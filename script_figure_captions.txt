@@ -1,0 +1,48 @@
+Captions for example figures made by diaObjectAnalysis.py and plotLightcurve.py
+--------
+
+All figures were generated with the scripts diaObjectAnalysis.py and
+plotLightcurve.py after running ap_pipe on the ap_verify_hits2015 dataset
+(see https://github.com/lsst/ap_verify_hits2015).
+
+
+cw_processed2_objSky.png
+
+All valid DIA (Difference Image Analysis) Objects from the PPDB
+(Prompt Products Database), which is created at the end of an ap_pipe run,
+plotted on the sky. Each of the DIA Objects have been detected as a variable
+object in the sky, likely of astrophysical origin.
+Each point is a single DIA Object. Each DIA Object is composed of one or more
+DIA Sources. DIA Sources correspond to images in which an object was
+detected in a difference image. Larger points and yellower (lighter) points
+represent DIA Objects with more DIA Sources.
+
+cw_processed2_objHist.png
+
+Histogram of all valid DIA Objects from the PPDB (dark blue). As in the
+previous figure, some DIA Objects are composed of more DIA Sources than others.
+A filter has been applied to select only the DIA Objects composed of at least
+15 DIA Sources in which none of those sources have a quality flag. These
+DIA Objects are overplotted in light blue. The dropoff at 28 Sources per Object
+is due to the partial overlap of two of the three DECam fields in the test
+dataset used (ap_verify_hits2015).
+
+cw_processed2_lcs.pdf
+
+A few DIA Object light curves displayed together with image cutouts of a
+processed visit image (i.e., calexp), the reference coadd template, and a
+difference image. Each light curve has multiple points, and only a single
+representative processed image and difference image are shown. Most if not all
+of the DIA Objects shown here are likely artifacts; this plot illustrates
+a useful way to visualize ap_pipe output. The DIA Object ID is printed in the
+middle of each page.
+
+cw_processed2_cos.pdf
+
+All of the processed visit image (i.e., calexp) cutouts and difference image
+cutouts corresponding to the light curves in the previous figure. The cutouts
+are small to leave room for cases where a DIA Object has up to 56 DIA Sources.
+The DIA Object ID is printed at the top of each page. All cutouts use a
+display normalized via a z-scale interval and a square-root stretch. Again,
+most if not all of the DIA Objects shown here are likely artifacts and not real
+astrophysical objects.
