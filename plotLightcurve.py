@@ -64,6 +64,21 @@ def main():
             pdfCutouts.close()
 
 
+def in_ipynb():
+    """Determine whether the code is being run in a notebook.
+    """
+    try:
+        cfg = get_ipython().config 
+        if cfg['IPKernelApp']['parent_appname'] == 'ipython-notebook':
+            return True
+        elif 'LazyConfigValue' in str(cfg['IPKernelApp']['parent_appname']):
+            return True
+        else:
+            return False
+    except NameError:
+        return False
+
+
 def loadPpdbObjects(repo, dbName='association.db', filter=''):
     """Load select DIAObject columns from a PPDB into a pandas dataframe.
 
@@ -119,7 +134,8 @@ def loadPpdbSources(dbPath, obj):
     tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
 
     # Load all information needed for light curves
-    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, ccdVisitId, \
+    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, \
+                                  ra, decl, ccdVisitId, \
                                   midPointTai, apFlux, psFlux, apFluxErr, \
                                   psFluxErr, totFlux, totFluxErr, flags from {0} \
                                   where diaObjectId = {1};'.format(tables['src'], obj), connection)
@@ -300,14 +316,18 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
                 if idx == 0:
                     plt.text(1, 26, 'Diff', color='lime', size=8)
                 plt.text(2, 5, str(srcTable['midPointTai'][idx])[1:8], color='lime', size=8)
-        if pdfCo:
+        if pdfCo and not in_ipynb():
             fig2.savefig(pdfCo, format='pdf')
+        elif not in_ipynb():
+            fig2.savefig(str(obj) + '_co.png')
         else:
-            fig2.savefig(obj + '_co.png')
-    if pdfLc:
+            plt.show()
+    if pdfLc and not in_ipynb():
         fig1.savefig(pdfLc, format='pdf')
+    elif not in_ipynb():
+        fig1.savefig(str(obj) + '_lc.png')
     else:
-        fig1.savefig(obj + '_lc.png')
+        plt.show()
 
 
 if __name__ == '__main__':
