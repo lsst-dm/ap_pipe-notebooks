@@ -67,14 +67,44 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
     """
     connection = sqlite3.connect(os.path.join(repo, dbName))
 
-    # These are the tables available in the ppdb
-    tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
+    # These are some of the tables available in the ppdb
+    tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
 
     # Only get objects with validityEnd NULL because that means they are still valid
     objTable = pd.read_sql_query('select diaObjectId, ra, decl, nDiaSources, \
                                   gPSFluxMean, validityEnd, flags from {0} \
                                   where validityEnd is NULL;'.format(tables['obj']), connection)
     return objTable
+
+
+def loadAllPpdbSources(repo, dbName='association.db'):
+    """Load select columns from all DIASources from a PPDB into a pandas dataframe.
+
+    Parameters
+    ----------
+    repo : `str`
+        Path to an output repository from an ap_pipe run.
+    dbName : `str`, optional
+        Name of the PPDB, which must reside in (or relative to) repo.
+        dbPath):
+
+    Returns
+    -------
+    srcTable : `pandas.DataFrame`
+        DIA Source Table including the columns hard-wired below.
+    """
+    connection = sqlite3.connect(os.path.join(repo, dbName))
+
+    # These are some of the tables available in the ppdb
+    tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
+
+    # Load data from the source table
+    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, \
+                                  ra, decl, ccdVisitId, \
+                                  midPointTai, apFlux, psFlux, apFluxErr, \
+                                  psFluxErr, totFlux, totFluxErr, flags from {0} \
+                                  '.format(tables['src']), connection)
+    return srcTable
 
 
 def setObjectFilter(objTable):
