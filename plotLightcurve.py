@@ -263,7 +263,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
     calexpFirst = butler.get('calexp', dataIdDicts[cutoutIdx])
     calexpArray = calexpFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
     calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-    plt.imshow(np.rot90(np.fliplr(calexpArray)), cmap='gray', norm=calexpNorm)
+    plt.imshow(np.rot90(calexpArray), cmap='gray', norm=calexpNorm)
 
     # template image
     plt.subplot(232)
@@ -286,7 +286,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
     diffimFirst = butler.get(diffimType, dataIdDicts[cutoutIdx])
     diffimArray = diffimFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
     diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-    plt.imshow(np.rot90(np.fliplr(diffimArray)), cmap='gray', norm=diffimNorm)
+    plt.imshow(np.rot90(diffimArray), cmap='gray', norm=diffimNorm)
 
     if plotAllCutouts:
         fig2 = plt.figure(figsize=(8, 8))  # optional figure with cutouts for all visits
@@ -302,7 +302,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
             plt.subplot(12, 12, idx+1)
             plt.gca().get_xaxis().set_ticks([])
             plt.gca().get_yaxis().set_ticks([])
-            plt.imshow(np.rot90(np.fliplr(calexpArray)), cmap='gray', norm=calexpNorm)
+            plt.imshow(np.rot90(calexpArray), cmap='gray', norm=calexpNorm)
             if labelCutouts:
                 if idx == 0:
                     plt.text(1, 26, 'Proc', color='lime', size=8)
@@ -311,7 +311,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
             plt.subplot(12, 12, idx+72+1)
             plt.gca().get_xaxis().set_ticks([])
             plt.gca().get_yaxis().set_ticks([])
-            plt.imshow(np.rot90(np.fliplr(diffimArray)), cmap='gray', norm=diffimNorm)
+            plt.imshow(np.rot90(diffimArray), cmap='gray', norm=diffimNorm)
             if labelCutouts:
                 if idx == 0:
                     plt.text(1, 26, 'Diff', color='lime', size=8)
