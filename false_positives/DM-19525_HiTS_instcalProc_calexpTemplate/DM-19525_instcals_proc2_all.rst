@@ -150,3 +150,12 @@ ApAssociation
     [gkovacs@lsst-dev03 hits_proc2019-07-03]$ python3 ../pair_calexps_with_template.py ../hits_cpline_dl/instcals/c4d_*fits.fz | sort -n > visit15_template14_pairs.txt
     [gkovacs@lsst-dev03 hits_proc2019-07-03]$ gawk '{ print("python3 run_assoc_2019-07-05.py repo/rerun/imgDiff_2019-07-04 "$1) }' visit15_template14_pairs.txt > assoc_cmd_2019-07-05
     [gkovacs@lsst-dev03 hits_proc2019-07-03]$ START=`date`; xargs -d "\n" parallel -j 6 -- < assoc_cmd_2019-07-05 |& tee -a assoc_2019-07-05.log; echo $START >> assoc_2019-07-05.log; date >> assoc_2019-07-05.log
+
+Runing AP association without parallelization: 
+
+::
+
+    [gkovacs@lsst-dev03 imgDiff_2019-07-04]$ mv association.db association_parallel.db
+    [gkovacs@lsst-dev03 hits_proc2019-07-03]$ make_ppdb.py -c ppdb.db_url=sqlite:///repo/rerun/imgDiff_2019-07-04/association.db -c ppdb.isolation_level="READ_UNCOMMITTED"
+    [gkovacs@lsst-dev03 hits_proc2019-07-03]$ START=`date`; source assoc_cmd_2019-07-05 |& tee -a assoc_serial_2019-07-11.log ; echo $START >> assoc_serial_2019-07-11.log; date >> assoc_serial_2019-07-11.log
+
