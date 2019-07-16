@@ -1,6 +1,9 @@
 Processing session 2019-07-03
 =============================
 
+All helper scripts are stored in
+``ap_pipe-notebooks/false_positives/DM-19525_HiTS_instcalProc_calexpTemplate``.
+
 Create the folders
 ------------------
 ::
@@ -13,7 +16,7 @@ Find the 2014 visit we want to use
 ------------------------------------
 ::
 
-    [gkovacs@lsst-dev03 Blind14A_10]$ python3 ../../print_visit_nums_fits.py *fits* | grep 289450
+    [gkovacs@lsst-dev03 Blind14A_10]$ python3 print_visit_nums_fits.py *fits* | grep 289450
         289450   tu2203328.fits.fz
         289450   tu2203517.fits.fz
         289450   tu2203700.fits.fz
@@ -25,41 +28,41 @@ Blind14A_10
 ~~~~~~~~~~~~
 ::
 
-    [gkovacs@lsst-dev03 Blind14A_10]$ python3 ../../dist_image_weightmap_dqmap.py tu2203328.fits.fz tu2203517.fits.fz tu2203700.fits.fz
+    [gkovacs@lsst-dev03 Blind14A_10]$ python3 dist_image_weightmap_dqmap.py tu2203328.fits.fz tu2203517.fits.fz tu2203700.fits.fz
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_10/tu2203328.fits.fz ../wtmaps/
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_10/tu2203517.fits.fz ../instcals/
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_10/tu2203700.fits.fz ../dqmasks/
-    [gkovacs@lsst-dev03 Blind14A_10]$ python3 ../../dist_image_weightmap_dqmap.py tu2203328.fits.fz tu2203517.fits.fz tu2203700.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind14A_10]$ python3 dist_image_weightmap_dqmap.py tu2203328.fits.fz tu2203517.fits.fz tu2203700.fits.fz | bash
 
 Blind14A_09
 ~~~~~~~~~~~~
 ::
 
-    [gkovacs@lsst-dev03 Blind14A_09]$ python3 ../../print_visit_nums_fits.py *fits* | grep 289449
+    [gkovacs@lsst-dev03 Blind14A_09]$ python3 print_visit_nums_fits.py *fits* | grep 289449
         289449   c4d_140303_050532_ood_g_a1.fits.fz
         289449   c4d_140303_050532_ooi_g_a1.fits.fz
         289449   c4d_140303_050532_oow_g_a1.fits.fz
         289449   tu2202825.fits.fz
         289449   tu2203670.fits.fz
         289449   tu2203702.fits.fz
-    [gkovacs@lsst-dev03 Blind14A_09]$ python3 ../../dist_image_weightmap_dqmap.py tu2202825.fits.fz tu2203670.fits.fz  tu2203702.fits.fz
+    [gkovacs@lsst-dev03 Blind14A_09]$ python3 dist_image_weightmap_dqmap.py tu2202825.fits.fz tu2203670.fits.fz  tu2203702.fits.fz
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_09/tu2202825.fits.fz ../instcals/
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_09/tu2203670.fits.fz ../dqmasks/
     ln -s /project/gkovacs/hits_instcal_dl/Blind14A_09/tu2203702.fits.fz ../wtmaps/
-    [gkovacs@lsst-dev03 Blind14A_09]$ python3 ../../dist_image_weightmap_dqmap.py tu2202825.fits.fz tu2203670.fits.fz   tu2203702.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind14A_09]$ python3 dist_image_weightmap_dqmap.py tu2202825.fits.fz tu2203670.fits.fz   tu2203702.fits.fz | bash
 
 Blind14A_04
 ~~~~~~~~~~~~
 ::
 
-    [gkovacs@lsst-dev03 Blind14A_04]$ python3 ../../print_visit_nums_fits.py *fits* | grep 289444
+    [gkovacs@lsst-dev03 Blind14A_04]$ python3 print_visit_nums_fits.py *fits* | grep 289444
         289444   c4d_140303_044946_ood_g_a1.fits.fz
         289444   c4d_140303_044946_ooi_g_a1.fits.fz
         289444   c4d_140303_044946_oow_g_a1.fits.fz
         289444   tu2202855.fits.fz
         289444   tu2202994.fits.fz
         289444   tu2203813.fits.fz
-    [gkovacs@lsst-dev03 Blind14A_04]$  python3 ../../dist_image_weightmap_dqmap.py tu2202855.fits.fz tu2202994.fits.fz tu2203813.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind14A_04]$  python3 dist_image_weightmap_dqmap.py tu2202855.fits.fz tu2202994.fits.fz tu2203813.fits.fz | bash
 
 
 Blind15A_26 Blind15A_40 Blind15A_42
@@ -67,11 +70,11 @@ Blind15A_26 Blind15A_40 Blind15A_42
 ::
 
     [gkovacs@lsst-dev03 hits_cpline_dl]$ cd Blind15A_26/
-    [gkovacs@lsst-dev03 Blind15A_26]$ python3 ../../dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind15A_26]$ python3 dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
     [gkovacs@lsst-dev03 Blind15A_26]$ cd ../Blind15A_42/
-    [gkovacs@lsst-dev03 Blind15A_42]$ python3 ../../dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind15A_42]$ python3 dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
     [gkovacs@lsst-dev03 Blind15A_42]$ cd ../Blind15A_40/
-    [gkovacs@lsst-dev03 Blind15A_40]$ python3 ../../dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
+    [gkovacs@lsst-dev03 Blind15A_40]$ python3 dist_image_weightmap_dqmap.py *g_v1.fits.fz | bash
     [gkovacs@lsst-dev03 Blind15A_40]$
 
 Check filters for old name style 2014A (template) files
@@ -117,7 +120,7 @@ Testcommand:
 Collecting visitnums for parallel processing command list:
 ::
 
-    [gkovacs@lsst-dev03 hits_proc2019-07-03]$ python3 ../print_visit_nums_fits.py ../hits_cpline_dl/instcals/*.fits.fz | gawk '{print $1}' | uniq | sort -n > ingested_visitnums.txt
+    [gkovacs@lsst-dev03 hits_proc2019-07-03]$ python3 print_visit_nums_fits.py ../hits_cpline_dl/instcals/*.fits.fz | gawk '{print $1}' | uniq | sort -n > ingested_visitnums.txt
 
 Print commands:
 ::

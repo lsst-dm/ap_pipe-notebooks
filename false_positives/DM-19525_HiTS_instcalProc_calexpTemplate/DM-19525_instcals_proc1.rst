@@ -18,6 +18,10 @@ Source files:
 
 NOAO archive downloads can be best filtered by the Proposal IDs: 2015A-0608 and 2014A-0608
 
+All helper scripts are stored in
+``ap_pipe-notebooks/false_positives/DM-19525_HiTS_instcalProc_calexpTemplate``.
+
+
 Processing session 2019-06-18
 =============================
 
@@ -66,13 +70,13 @@ Running of processCcd
 ---------------------
 ::
 
-    [gkovacs@lsst-dev03 hits_instcals]$ processCcd.py repo/ --rerun proc_2019-06-18 -C config/ processCcd_2019-06-18.py --id |& tee -a procCcd_2019-06-18.log
+    [gkovacs@lsst-dev03 hits_proc2019-06-20]$ processCcd.py repo/ --rerun proc_2019-06-18 -C config/ processCcd_2019-06-18.py --id |& tee -a procCcd_2019-06-18.log
 
 Running of imageDifference
 --------------------------
 ::
 
-    [gkovacs@lsst-dev03 hits_instcals]$ bash run_imageDifference_2019-06-20.sh |& tee -a imageDifference_2019-06-20.log
+    [gkovacs@lsst-dev03 hits_proc2019-06-20]$ bash run_imageDifference_2019-06-20.sh |& tee -a imageDifference_2019-06-20.log
 
 Running for each visit with its matching template image:
 ::
@@ -84,5 +88,5 @@ Running of ap_association
 --------------------------
 ::
 
-    [gkovacs@lsst-dev03 hits_instcals]$ make_ppdb.py -c ppdb.db_url=sqlite:///repo/rerun/imgDiff_2019-06-20/association.db -c ppdb.isolation_level="READ_UNCOMMITTED"
-    [gkovacs@lsst-dev03 hits_instcals]$ python3 ../assoc_wrapper/run_assoc_2019-06-21.py |& tee -a run_assoc_2019-06-26.log
+    [gkovacs@lsst-dev03 hits_proc2019-06-20]$ make_ppdb.py -c ppdb.db_url=sqlite:///repo/rerun/imgDiff_2019-06-20/association.db -c ppdb.isolation_level="READ_UNCOMMITTED"
+    [gkovacs@lsst-dev03 hits_proc2019-06-20]$ python3 run_assoc_2019-06-21.py |& tee -a run_assoc_2019-06-26.log
