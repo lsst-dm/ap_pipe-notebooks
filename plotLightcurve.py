@@ -68,7 +68,7 @@ def in_ipynb():
     """Determine whether the code is being run in a notebook.
     """
     try:
-        cfg = get_ipython().config 
+        cfg = get_ipython().config
         if cfg['IPKernelApp']['parent_appname'] == 'ipython-notebook':
             return True
         elif 'LazyConfigValue' in str(cfg['IPKernelApp']['parent_appname']):
@@ -142,52 +142,73 @@ def loadPpdbSources(dbPath, obj):
     return srcTable
 
 
-def patchFinder(obj, objTable, templateRepo, patchList):
-    """Determine which patch overlaps a DIA Object RA, Dec location
-    from a list of possible patches.
+def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.Extent2I(30, 30),
+                      templateDataType='deepCoadd', filter='g', templateVisit=None):
+    """Retrieve cutout of difference imaging template.
 
     Parameters
     ----------
-    obj : `int`
-        DIA Object ID.
-    objTable : `pandas.DataFrame`
-        DIA Object Table which contains obj.
+    scienceImage : `lsst.afw.image`
+        Image which has been differenced that you want to get the template for.
     templateRepo : `str`
-        Path to repository containing templates for image differencing.
-    patchList : `list`
-        List of possible patches.
+        Path to repository containing difference imaging templates.
+    centerSource : `lsst.geom.SpherePoint`
+        Desired center coordinate of cutout.
+    size : `lsst.geom.Extent`, optional
+        Desired size of cutout, default is 30x30 pixels
+    templateDataType : `str`, optional
+        Default is 'deepCoadd'. Other possibilities could be 'calexp', 'instcal', etc.
+    filter : `str`, optional
+        Filter to use in constructing template dataId. Default is 'g'.
+    templateVisit : `int` or None, optional
+        Must specify templateVisit if templateDataType is not some kind of coadd.
 
     Returns
     -------
-    templatePatch : `str`
-        The first patch in patchList which overlaps the RA, Dec of obj.
+    coaddCutout : `lsst.afw.image`
+        A small image postage stamp cutout around the template source.
     """
     templateButler = dafPersist.Butler(templateRepo)
-    templatePatch = None
-    for patch in patchList:
-        ra = objTable.loc[objTable['diaObjectId'] == obj, 'ra']
-        dec = objTable.loc[objTable['diaObjectId'] == obj, 'decl']
-        centerSource = lsst.geom.SpherePoint(ra, dec, lsst.geom.degrees)
-        size = lsst.geom.Extent2I(30, 30)
-        templateDataId = {'filter': 'g', 'tract': 0, 'patch': patch}
-        templateImage = templateButler.get('deepCoadd', dataId=templateDataId)
-        try:
-            templateImage.getCutout(centerSource, size)
-        except:
-            pass
-        else:
-            templatePatch = patch
-            return templatePatch
-            break
-    if templatePatch is None:
-        print('WARNING: No template patch found')
+    if 'Coadd' in templateDataType or 'coadd' in templateDataType:
+        skyMap = templateButler.get(datasetType=templateDataType + '_skyMap')
+        expWcs = scienceImage.getWcs()
+        expBoxD = lsst.geom.Box2D(scienceImage.getBBox())
+        expBoxD.grow(10)
+        ctrSkyPos = expWcs.pixelToSky(expBoxD.getCenter())
+        tractInfo = skyMap.findTract(ctrSkyPos)
+        skyCorners = [expWcs.pixelToSky(pixPos) for pixPos in expBoxD.getCorners()]
+        patchList = tractInfo.findPatchList(skyCorners)
+        for patchInfo in patchList:
+            templateDataId = dict(
+                tract=tractInfo.getId(),
+                patch="%s,%s" % (patchInfo.getIndex()[0], patchInfo.getIndex()[1]),
+                filter=filter,
+            )
+            coaddTemplate = templateButler.get('deepCoadd', dataId=templateDataId)
+            try:
+                templateCutout = coaddTemplate.getCutout(centerSource, size)
+            except:
+                continue
+    else:  # it's a calexp or an instcal; assume DECam for now
+        ccdnum = int(str(scienceImage.getInfo().getVisitInfo().getExposureId())[-2:])  # sorry
+        templateDataId = dict(
+            filter=filter,
+            visit=templateVisit,
+            ccdnum=ccdnum,
+        )
+        templateExposure = templateButler.get(templateDataType, dataId=templateDataId)
+        templateCutout = templateExposure.getCutout(centerSource, size)
+
+    print("Template dataId %s" % templateDataId)
+    return templateCutout
 
 
-def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
+def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
                    useTotFlux=False, plotAllCutouts=False,
                    cutoutIdx=0, labelCutouts=False,
                    diffimType='deepDiff_differenceExp',
-                   pdfLc=None, pdfCo=None):
+                   pdfLc=None, pdfCo=None, diffimRepo=None,
+                   templateDataType='deepCoadd', templateVisitList=None):
     """Plot lightcurve and processed, template, and difference image cutouts
     for one DIAObject. The lightcurve includes all associated DIASources.
 
@@ -199,17 +220,29 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
         DIA Object ID.
     objTable : `pandas.DataFrame`
         DIA Object Table which contains obj.
+    repo : `str`
+        Path to repository containing processed visit images.
+    dbName : `str`
+        Location of PPDB relative to repo.
     templateRepo : `str`
         Path to repository containing templates for image differencing.
-    patchList : `str`
-        List of patches to search with patchFinder
-        (we assume tract=0 to construct the template dataId).
     useTotFlux : `bool`, optional, default False
     plotAllCutouts : `bool`, optional, default False
     cutoutIdx : `int`, optional, default 0
     labelCutouts : `bool`, optional, default False
     diffimType : `str`, optional, default deep (not dcr)
         Typically either 'deepDiff_differenceExp' or 'dcrDiff_differenceExp'
+    pdfLc : `str`
+        Filename to save PDF light curve plots to
+    pdfCo : `str`
+        Filename to save PDF cutout plots to
+    diffimRepo : `str`, optional
+        Path to repository containing diffims. Only use if this differs from repo.
+    templateDataType : `str`, optional
+        Specify, e.g., 'calexp' or 'instcal' if you don't have a 'deepCoadd'.
+    templateVisitList : `list`, optional
+        If you're using non-coadd templates and want to retrieve a
+        cutout, provide a list of possible template visits to try here.
     """
     print('Loading PPDB Sources...')
     dbPath = os.path.join(repo, dbName)
@@ -226,7 +259,6 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
         dataIdDicts.append(dataIdDict)
     centerSource = lsst.geom.SpherePoint(ra, dec, lsst.geom.degrees)
     size = lsst.geom.Extent2I(30, 30)
-    patch = patchFinder(obj, objTable, templateRepo, patchList)
 
     print('DIAObject ID:', obj)
     # print('Flags:', flags)
@@ -235,7 +267,6 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
     print('Number of DIASources:', len(srcTable['diaSourceId'].values))
     # print('DIASource IDs:', srcTable['diaSourceId'].values)
     # print('Data IDs:', dataIdDicts)
-    print('Template patch:', patch)
 
     fig1 = plt.figure()
     fig1.text(0.5, 0.5, str(obj), horizontalalignment='center', verticalalignment='center')
@@ -260,7 +291,10 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
     plt.gca().get_yaxis().set_ticks([])
     plt.title('Processed', size=16)
     butler = dafPersist.Butler(repo)
-    calexpFirst = butler.get('calexp', dataIdDicts[cutoutIdx])
+    try:
+        calexpFirst = butler.get('calexp', dataIdDicts[cutoutIdx])
+    except RuntimeError:
+        calexpFirst = butler.get('instcal', dataIdDicts[cutoutIdx])
     calexpArray = calexpFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
     calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
     plt.imshow(np.rot90(calexpArray), cmap='gray', norm=calexpNorm)
@@ -270,20 +304,34 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
     plt.gca().get_xaxis().set_ticks([])
     plt.gca().get_yaxis().set_ticks([])
     plt.title('Template', size=16)
-    if patch is not None:
-        templateDataId = {'filter': 'g', 'tract': 0, 'patch': patch}
-        butlerTemplate = dafPersist.Butler(templateRepo)
-        template = butlerTemplate.get('deepCoadd', dataId=templateDataId)
-        templateArray = template.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
+    templateCutout = None
+    if 'Coadd' in templateDataType or 'coadd' in templateDataType:
+        templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource)
+        templateArray = templateCutout.getMaskedImage().getImage().getArray()
         templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
         plt.imshow(np.flipud(templateArray), cmap='gray', norm=templateNorm)
+    else:  # it's a calexp or an instcal, probably
+        for visit in templateVisitList:
+            try:
+                templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource,
+                                                   templateDataType=templateDataType,
+                                                   templateVisit=visit)
+            except:
+                continue  # loop through other possible visits
+        templateArray = templateCutout.getMaskedImage().getImage().getArray()
+        templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+        plt.imshow(np.rot90(templateArray), cmap='gray', norm=templateNorm)
 
     # difference image
     plt.subplot(233)
     plt.gca().get_xaxis().set_ticks([])
     plt.gca().get_yaxis().set_ticks([])
     plt.title('Difference', size=16)
-    diffimFirst = butler.get(diffimType, dataIdDicts[cutoutIdx])
+    if diffimRepo is not None:
+        butlerDiffim = dafPersist.Butler(diffimRepo)
+        diffimFirst = butlerDiffim.get(diffimType, dataIdDicts[cutoutIdx])
+    else:
+        diffimFirst = butler.get(diffimType, dataIdDicts[cutoutIdx])
     diffimArray = diffimFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
     diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
     plt.imshow(np.rot90(diffimArray), cmap='gray', norm=diffimNorm)
@@ -293,10 +341,17 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo, patchList,
         fig2.subplots_adjust(hspace=0, wspace=0)
         fig2.text(0.5, 0.9, str(obj), horizontalalignment='center', verticalalignment='top')
         for idx, dataId in enumerate(dataIdDicts):
-            calexp = butler.get('calexp', dataId)
+            try:
+                calexp = butler.get('calexp', dataId)
+            except RuntimeError:
+                calexp = butler.get('instcal', dataId)
             calexpArray = calexp.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
             calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-            diffim = butler.get(diffimType, dataId)
+            if diffimRepo is not None:
+                butlerDiffim = dafPersist.Butler(diffimRepo)
+                diffim = butlerDiffim.get(diffimType, dataId)
+            else:
+                diffim = butler.get(diffimType, dataId)
             diffimArray = diffim.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
             diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
             plt.subplot(12, 12, idx+1)
