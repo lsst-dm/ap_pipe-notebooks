@@ -309,7 +309,8 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
         templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource)
         templateArray = templateCutout.getMaskedImage().getImage().getArray()
         templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-        plt.imshow(np.flipud(templateArray), cmap='gray', norm=templateNorm)
+        # plt.imshow(np.flipud(templateArray), cmap='gray', norm=templateNorm)  # wrong orientation
+        plt.imshow(np.fliplr(templateArray), cmap='gray', norm=templateNorm)
     else:  # it's a calexp or an instcal, probably
         for visit in templateVisitList:
             try:
