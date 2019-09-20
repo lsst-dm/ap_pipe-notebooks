@@ -184,11 +184,14 @@ def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.E
                 patch="%s,%s" % (patchInfo.getIndex()[0], patchInfo.getIndex()[1]),
                 filter=filter,
             )
-            coaddTemplate = templateButler.get('deepCoadd', dataId=templateDataId)
             try:
+                coaddTemplate = templateButler.get('deepCoadd', dataId=templateDataId)
                 templateCutout = coaddTemplate.getCutout(centerSource, size)
             except:
                 continue
+            else:
+                # Only loop through patches until you find one containing the source
+                break
     else:  # it's a calexp or an instcal; assume DECam for now
         ccdnum = int(str(scienceImage.getInfo().getVisitInfo().getExposureId())[-2:])  # sorry
         templateDataId = dict(
@@ -208,7 +211,8 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
                    cutoutIdx=0, labelCutouts=False,
                    diffimType='deepDiff_differenceExp',
                    pdfLc=None, pdfCo=None, diffimRepo=None,
-                   templateDataType='deepCoadd', templateVisitList=None):
+                   templateDataType='deepCoadd', templateVisitList=None,
+                   orderVisits=True):
     """Plot lightcurve and processed, template, and difference image cutouts
     for one DIAObject. The lightcurve includes all associated DIASources.
 
@@ -247,6 +251,8 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     print('Loading PPDB Sources...')
     dbPath = os.path.join(repo, dbName)
     srcTable = loadPpdbSources(dbPath, obj)
+    if orderVisits:
+        srcTable = srcTable.sort_values("ccdVisitId")
     ra = objTable.loc[objTable['diaObjectId'] == obj, 'ra']
     dec = objTable.loc[objTable['diaObjectId'] == obj, 'decl']
     #  flags = srcTable['flags']
@@ -309,7 +315,6 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
         templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource)
         templateArray = templateCutout.getMaskedImage().getImage().getArray()
         templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-        # plt.imshow(np.flipud(templateArray), cmap='gray', norm=templateNorm)  # wrong orientation
         plt.imshow(np.fliplr(templateArray), cmap='gray', norm=templateNorm)
     else:  # it's a calexp or an instcal, probably
         for visit in templateVisitList:
