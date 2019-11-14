@@ -5,7 +5,7 @@ from lsst.ap.association import (
     MapDiaSourceTask,
     make_dia_object_schema,
     make_dia_source_schema)
-from lsst.dax.ppdb import Ppdb, PpdbConfig
+from lsst.dax.apdb import Apdb, ApdbConfig
 from lsst.utils import getPackageDir
 from lsst.pipe.tasks.imageDifference import (ImageDifferenceTask,
                                              ImageDifferenceConfig)
@@ -39,23 +39,23 @@ class RunAssociation:
         """
 
         self.log = Log.getLogger("RunAssociation")
-        self.ppdbConfig = PpdbConfig()
-        self.ppdbConfig.db_url = "sqlite:///" + db_file
-        self.ppdbConfig.isolation_level = "READ_UNCOMMITTED"
-        self.ppdbConfig.dia_object_index = "baseline"
-        self.ppdbConfig.dia_object_columns = []
-        self.ppdbConfig.connection_timeout = 240
-        self.ppdbConfig.schema_file = _data_file_name(
-            "ppdb-schema.yaml", "dax_ppdb")
-        self.ppdbConfig.column_map = _data_file_name(
-            "ppdb-ap-pipe-afw-map.yaml", "ap_association")
-        self.ppdbConfig.extra_schema_file = _data_file_name(
-            "ppdb-ap-pipe-schema-extra.yaml", "ap_association")
+        self.apdbConfig = ApdbConfig()
+        self.apdbConfig.db_url = "sqlite:///" + db_file
+        self.apdbConfig.isolation_level = "READ_UNCOMMITTED"
+        self.apdbConfig.dia_object_index = "baseline"
+        self.apdbConfig.dia_object_columns = []
+        self.apdbConfig.connection_timeout = 240
+        self.apdbConfig.schema_file = _data_file_name(
+            "apdb-schema.yaml", "dax_apdb")
+        self.apdbConfig.column_map = _data_file_name(
+            "apdb-ap-pipe-afw-map.yaml", "ap_association")
+        self.apdbConfig.extra_schema_file = _data_file_name(
+            "apdb-ap-pipe-schema-extra.yaml", "ap_association")
 
-        self.ppdb = Ppdb(config=self.ppdbConfig,
+        self.apdb = Apdb(config=self.apdbConfig,
                          afw_schemas=dict(DiaObject=make_dia_object_schema(),
                                           DiaSource=make_dia_source_schema()))
-        # ppdb.makeSchema()
+        # apdb.makeSchema()
         self.differencerConfig = ImageDifferenceConfig()
         # Schema is different if we do decorrelation
         self.differencerConfig.doDecorrelation = True
@@ -79,7 +79,7 @@ class RunAssociation:
         dia_sources = self.diaSourceDpddifier.run(catalog,
                                                   diffim,
                                                   return_pandas=True)
-        self.associator.run(dia_sources, diffim, self.ppdb)
+        self.associator.run(dia_sources, diffim, self.apdb)
 
     def run(self, repo, visitIds):
         """Loop through visits and process all available exposures within.
