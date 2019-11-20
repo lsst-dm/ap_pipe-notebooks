@@ -6,8 +6,8 @@ import matplotlib.ticker as plticker
 import pandas as pd
 import sqlite3
 
-"""Script to make plots of DIAObjects using a Prompt Products Database
-(PPDB) resulting from a run of ap_pipe.
+"""Script to make plots of DIAObjects using a Alert Production Database
+(APDB) resulting from a run of ap_pipe.
 """
 
 
@@ -27,11 +27,11 @@ def main():
             dbName = sys.argv[2]
         except:
             print('Using default dbName, association.db')
-            print('Loading PPDB...')
-            objTable = loadAllPpdbObjects(repo)
+            print('Loading APDB...')
+            objTable = loadAllApdbObjects(repo)
         else:
-            print('Loading PPDB...')
-            objTable = loadAllPpdbObjects(repo, dbName)
+            print('Loading APDB...')
+            objTable = loadAllApdbObjects(repo, dbName)
         finally:
             objFilter = setObjectFilter(objTable)
             print('Plotting Objects...')
@@ -49,15 +49,15 @@ def main():
             print('Figures saved to {0} and {1}'.format(histName, skyName))
 
 
-def loadAllPpdbObjects(repo, dbName='association.db'):
-    """Load select DIAObject columns from a PPDB into a pandas dataframe.
+def loadAllApdbObjects(repo, dbName='association.db'):
+    """Load select DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
     repo : `str`
         Path to an output repository from an ap_pipe run.
     dbName : `str`, optional
-        Name of the PPDB, which must reside in (or relative to) repo.
+        Name of the APDB, which must reside in (or relative to) repo.
 
     Returns
     -------
@@ -67,7 +67,7 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
     """
     connection = sqlite3.connect(os.path.join(repo, dbName))
 
-    # These are some of the tables available in the ppdb
+    # These are some of the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
 
     # Only get objects with validityEnd NULL because that means they are still valid
@@ -77,15 +77,15 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
     return objTable
 
 
-def loadAllPpdbSources(repo, dbName='association.db'):
-    """Load select columns from all DIASources from a PPDB into a pandas dataframe.
+def loadAllApdbSources(repo, dbName='association.db'):
+    """Load select columns from all DIASources from a APDB into a pandas dataframe.
 
     Parameters
     ----------
     repo : `str`
         Path to an output repository from an ap_pipe run.
     dbName : `str`, optional
-        Name of the PPDB, which must reside in (or relative to) repo.
+        Name of the APDB, which must reside in (or relative to) repo.
         dbPath):
 
     Returns
@@ -95,7 +95,7 @@ def loadAllPpdbSources(repo, dbName='association.db'):
     """
     connection = sqlite3.connect(os.path.join(repo, dbName))
 
-    # These are some of the tables available in the ppdb
+    # These are some of the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
 
     # Load data from the source table

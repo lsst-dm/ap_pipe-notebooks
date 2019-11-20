@@ -11,8 +11,8 @@ import lsst.daf.persistence as dafPersist
 import lsst.afw.display as afwDisplay
 import lsst.geom
 
-"""Script to make light curve plots for DIAObjects using a Prompt Products
-Database (PPDB) resulting from a run of ap_pipe.
+"""Script to make light curve plots for DIAObjects using a Alert Production
+Database (APDB) resulting from a run of ap_pipe.
 
 Two plots are created: one for the light curve with a single set of
 processed/template/difference cutouts, and one showing all of the
@@ -45,8 +45,8 @@ def main():
             print('Using default dbName, association.db')
             dbName = 'association.db'
         finally:
-            print('Loading PPDB Objects...')
-            objTable = loadPpdbObjects(repo, dbName, filter=miniRegion)
+            print('Loading APDB Objects...')
+            objTable = loadApdbObjects(repo, dbName, filter=miniRegion)
             objIdList = list(objTable['diaObjectId'])
             print('Loaded {0} DIA Objects'.format(len(objIdList)))
             # if len(objIdList) > 20:
@@ -79,17 +79,17 @@ def in_ipynb():
         return False
 
 
-def loadPpdbObjects(repo, dbName='association.db', filter=''):
-    """Load select DIAObject columns from a PPDB into a pandas dataframe.
+def loadApdbObjects(repo, dbName='association.db', filter=''):
+    """Load select DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
     repo : `str`
         Path to an output repository from an ap_pipe run.
     dbName : `str`, optional
-        Name of the PPDB, which must reside in (or relative to) repo.
+        Name of the APDB, which must reside in (or relative to) repo.
     filter : `str`, optional
-        Criteria defining which objects to load from the PPDB.
+        Criteria defining which objects to load from the APDB.
         The default is no additional filter (i.e., loading all objects);
         be careful - we will be plotting each object, so we want a number
         we can actually work with!
@@ -101,7 +101,7 @@ def loadPpdbObjects(repo, dbName='association.db', filter=''):
     """
     connection = sqlite3.connect(os.path.join(repo, dbName))
 
-    # These are the tables available in the ppdb
+    # These are the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
 
     # Only get objects with validityEnd NULL because that means they are still valid
@@ -112,13 +112,13 @@ def loadPpdbObjects(repo, dbName='association.db', filter=''):
     return objTable
 
 
-def loadPpdbSources(dbPath, obj):
-    """Load select DIAObject columns from a PPDB into a pandas dataframe.
+def loadApdbSources(dbPath, obj):
+    """Load select DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
     repo : `str`
-        Path to the PPDB.
+        Path to the APDB.
     obj : `int`
         DIA Object for which we want to retrieve constituent DIA Sources.
 
@@ -130,7 +130,7 @@ def loadPpdbSources(dbPath, obj):
     """
     connection = sqlite3.connect(dbPath)
 
-    # These are the tables available in the ppdb
+    # These are the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
 
     # Load all information needed for light curves
@@ -227,7 +227,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     repo : `str`
         Path to repository containing processed visit images.
     dbName : `str`
-        Location of PPDB relative to repo.
+        Location of APDB relative to repo.
     templateRepo : `str`
         Path to repository containing templates for image differencing.
     useTotFlux : `bool`, optional, default False
@@ -248,9 +248,9 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
         If you're using non-coadd templates and want to retrieve a
         cutout, provide a list of possible template visits to try here.
     """
-    print('Loading PPDB Sources...')
+    print('Loading APDB Sources...')
     dbPath = os.path.join(repo, dbName)
-    srcTable = loadPpdbSources(dbPath, obj)
+    srcTable = loadApdbSources(dbPath, obj)
     if orderVisits:
         srcTable = srcTable.sort_values("ccdVisitId")
     ra = objTable.loc[objTable['diaObjectId'] == obj, 'ra']
