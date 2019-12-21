@@ -15,7 +15,7 @@ source /software/lsstsw/stack/loadLSST.bash
 setup lsst_distrib
 
 # Config stuff
-rerun="cw_2019_12"
+rerun="cw_2019_12v2"
 calib="/project/mrawls/hits2015/calib5"
 template="/project/mrawls/hits2014/rerun/2019_12_coadds_full"
 #template="/project/sullivan/hits2014B/cwcoadds_processed2" # high-res
