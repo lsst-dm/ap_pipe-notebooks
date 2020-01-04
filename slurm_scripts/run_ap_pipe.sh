@@ -17,7 +17,7 @@ setup lsst_distrib
 # Config stuff
 rerun="cw_2019_12v2"
 calib="/project/mrawls/hits2015/calib5"
-template="/project/mrawls/hits2014/rerun/2019_12_coadds_full"
+template="/project/mrawls/hits2014/rerun/2019_12_coadds_full2"
 #template="/project/sullivan/hits2014B/cwcoadds_processed2" # high-res
 #template="/project/mrawls/hits2014/coadds_processed2"  # old standard
 db_config=(-c apdb.db_url="sqlite:////project/mrawls/hits2015/rerun/$rerun/association.db" -c apdb.isolation_level="READ_UNCOMMITTED" -c apdb.connection_timeout=240)
