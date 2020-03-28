@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 import pandas as pd
 import functools
 import operator
+from astropy import units as u
 
 import lsst.daf.persistence as dafPersist
 import lsst.afw.display as afwDisplay
@@ -14,7 +15,7 @@ from lsst.ap.association import MapDiaSourceConfig, UnpackApdbFlags
 import lsst.afw.cameraGeom as cameraGeom
 
 from diaObjectAnalysis import loadAllApdbObjects, loadAllApdbSources
-import plotLightcurve as plc
+from plotLightcurve import getTemplateCutout
 """
 Collection of plots that can be made using info in the APDB.
 
@@ -28,27 +29,30 @@ Future plots could include:
 """
 
 
-def addVisitCcdToSrcTable(sourceTable):
+def addVisitCcdToSrcTable(sourceTable, cam='decam'):
     """Add visit and ccd columns to sourceTable dataframe.
-
-    This assumes the `ccdVisitId` field may be cast to type `str` and
-    is arranged such that the last 2 characters represent a ccd and all
-    preceding characters represent a visit.
-
-    TODO: generalize this for other exposure ID formats.
+    This currently works for DECam and HSC only.
 
     Parameters
     ----------
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
+    cam : `str`, one of either 'decam' or 'hsc', default is 'decam'
+        Needed to properly add the "ccd" and "visit" columns to the sourceTable.
 
     Returns
     -------
     sourceTable : `pandas.core.frame.DataFrame`
         The same as the input sourceTable, with new visit and ccd columns.
     """
-    sourceTable['ccd'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[-2:])
-    sourceTable['visit'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[:-2])
+    if cam == 'decam':
+        sourceTable['ccd'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[-2:])
+        sourceTable['visit'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[:-2])
+    elif cam == 'hsc':
+        sourceTable['visit'] = sourceTable.ccdVisitId.apply(lambda x: int(x/200.))
+        sourceTable['ccd'] = sourceTable.ccdVisitId.apply(lambda x: int(np.round((x/200. - int(x/200.))*200)))
+    else:
+        raise ValueError('This plotting utility only works for DECam and HSC.')
     return sourceTable
 
 
@@ -96,7 +100,7 @@ def plot2axes(x1, y1, x2, y2, xlabel, ylabel1, ylabel2, y1err=None, y2err=None, 
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
 
 
-def plotDiaSourcesPerVisit(sourceTable, approxVisitArea=0.045, title=''):
+def plotDiaSourcesPerVisit(repo, sourceTable, title=''):
     """Plot DIA Sources per visit.
 
     The plot will have two y-axes: number of DIA Sources per square degree and
@@ -104,20 +108,19 @@ def plotDiaSourcesPerVisit(sourceTable, approxVisitArea=0.045, title=''):
 
     Parameters
     ----------
+    repo : `str`
+        Repository corresponding to the output of an ap_pipe run.
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
-    approxVisitArea : `float`
-        Approximate area of one visit (all ccds), in square degrees.
-        Default set to an appropriate DECam value.
     title : `str`
         Title for the plot, optional.
     """
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
+    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable)
     traceRadius = np.sqrt(0.5) * np.sqrt(sourceTable.ixxPSF + sourceTable.iyyPSF)
     sourceTable['seeing'] = 2*np.sqrt(2*np.log(2)) * traceRadius
     visitGroup = sourceTable.groupby('visit')
     plot2axes(visitGroup.visit.first().values,
-              visitGroup.ccd.count().values/approxVisitArea,
+              visitGroup.ccd.count().values/visitArea,
               visitGroup.visit.first().values,
               visitGroup.seeing.median().values,
               'Visit',
@@ -160,7 +163,7 @@ def plotDiaSourcesPerNight(sourceTable, title=''):
     plt.ylim(0, np.max(visits_per_night['x'].values + 1))
 
 
-def ccd2focalPlane(x, y, ccd, butler):
+def ccd2focalPlane(x, y, ccd, camera):
     """Retrieve focal plane coordinates.
 
     Parameters
@@ -171,8 +174,8 @@ def ccd2focalPlane(x, y, ccd, butler):
         Y-coordinate from ccd bbox.
     ccd : `int`, or can be cast as int
         The ccd being considered.
-    butler : `lsst.daf.persistence.Butler`
-        Butler in the repository corresponding to the output of an ap_pipe run.
+    camera : `lsst.afw.cameraGeom.Camera`
+        Camera obtained from the butler.
 
     Returns
     -------
@@ -181,14 +184,13 @@ def ccd2focalPlane(x, y, ccd, butler):
     point[1] : `int` or `float`
         Y-coordinate in focal plane.
     """
-    camera = butler.get('camera')
     detector = camera[int(ccd)]
     point = detector.transform(lsst.geom.Point2D(x, y),
                                cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
     return point[0], point[1]
 
 
-def getCcdCorners(butler, sourceTable, ccdMin=1, ccdMax=63):
+def getCcdCorners(butler, sourceTable):
     """Get corner coordinates for a range of ccds.
 
     Parameters
@@ -197,10 +199,6 @@ def getCcdCorners(butler, sourceTable, ccdMin=1, ccdMax=63):
         Butler in the repository corresponding to the output of an ap_pipe run.
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
-    ccdMin : `int`
-        Starting value for ccd range, default 1 for DECam.
-    ccdMax : `int`
-        Ending value for ccd range (final ccd + 1), default 63 for DECam.
 
     Returns
     -------
@@ -208,32 +206,46 @@ def getCcdCorners(butler, sourceTable, ccdMin=1, ccdMax=63):
         Dataframe containing focal plane coordinates for all the ccd corners.
     """
     cornerList = []
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
     visits = np.unique(sourceTable['visit'])
+    ccds = np.unique(sourceTable['ccd'])
+    ccdMin = np.min(ccds)
+    ccdMax = np.max(ccds)
     visit = int(visits[0])  # shouldn't matter what visit we use
     for ccd in range(ccdMin, ccdMax):
         try:
             bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
         except dafPersist.NoResults:  # silently skip any ccds that don't exist
-            # print('No bbox for visit, ccd ', visit, ccd)
-            visit = int(visits[1])  # try a different visit just in case
-            try:
-                bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
-            except dafPersist.NoResults:
-                # print('Also no bbox for visit, ccd ', visit, ccd)
-                continue  # give up
-            continue
+            for visit in visits[1:]:  # try the other visits just in case
+                visit = int(visit)
+                try:
+                    bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
+                except dafPersist.NoResults:
+                    continue
+                break
         else:
+            camera = butler.get('camera')
             cornerList.append([visit, ccd] + [val for pair in bbox.getCorners()
-                              for val in ccd2focalPlane(pair[0], pair[1], ccd, butler)])
+                              for val in ccd2focalPlane(pair[0], pair[1], ccd, camera)])
     corners = pd.DataFrame(cornerList)
     corners['width'] = corners[6] - corners[8]
     corners['height'] = corners[7] - corners[5]
     return corners
 
 
-def plotDiaSourceDensityInFocalPlane(repo, sourceTable, approxCcdArea=2.678,
-                                     cmap=mpl.cm.Blues, title=''):
+def getCcdAndVisitSizeOnSky(repo, sourceTable):
+    butler = dafPersist.Butler(repo)
+    visits = np.unique(sourceTable.visit)
+    ccds = np.unique(sourceTable.ccd)
+    nGoodCcds = len(ccds)
+    calexp = butler.get('calexp', visit=int(visits[0]), ccd=47)
+    bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=47)
+    pixelScale = calexp.getWcs().getPixelScale().asArcseconds()
+    ccdArea = (pixelScale*pixelScale*bbox.getArea()*u.arcsec**2).to(u.deg**2).value
+    visitArea = ccdArea * nGoodCcds
+    return ccdArea, visitArea
+
+
+def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title=''):
     """Plot average density of DIA Sources in the focal plane (per CCD).
 
     Parameters
@@ -242,37 +254,38 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, approxCcdArea=2.678,
         Repository corresponding to the output of an ap_pipe run.
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
-    approxCcdArea : `float`
-        Approximate area per ccd, in square degrees.
-        Default set to an appropriate DECam value.
     cmap : `matplotlib.colors.ListedColormap`
         Matplotlib colormap.
     title : `str`
         String to append to the plot title, optional.
     """
-    butler = dafPersist.Butler(repo)
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
+    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable)
     nVisits = len(np.unique(sourceTable['visit'].values))
-    grp = sourceTable.groupby('ccd')
-    yy = grp.visit.count().values/nVisits/approxCcdArea
+    ccdGroup = sourceTable.groupby('ccd')
+    ccdSourceCount = ccdGroup.visit.count().values/nVisits/ccdArea
+    # DIA Source count per visit per square degree, for each CCD
+    butler = dafPersist.Butler(repo)
     corners = getCcdCorners(butler, sourceTable)
-    norm = mpl.colors.Normalize(vmin=np.min(yy), vmax=np.max(yy))
+    norm = mpl.colors.Normalize(vmin=np.min(ccdSourceCount), vmax=np.max(ccdSourceCount))
 
     fig1 = plt.figure(figsize=(8, 8))
     ax1 = fig1.add_subplot(111, aspect='equal')
 
     for index, row in corners.iterrows():
-        color = cmap(norm(grp.get_group('%02d' % row[1]).x.count()/nVisits/approxCcdArea))
+        try:
+            averageFocalPlane = ccdGroup.get_group(int(row[1])).x.count()/nVisits/ccdArea
+        except KeyError:
+            averageFocalPlane = 0
         ax1.add_patch(patches.Rectangle((row[7], row[6]),
                       -row.height,
                       -row.width,
                       fill=True,
-                      color=color))
-        ax1.text(row[7]-row.height/2, row[6]-row.width/2, '%d' % (row[1]), fontsize=14)
+                      color=cmap(norm(averageFocalPlane))))
+        ax1.text(row[7]-row.height/2, row[6]-row.width/2, '%d' % (row[1]), fontsize=12)
         plt.plot(row[7]-row.height/2, row[6]-row.width/2, ',')
     ax1.set_title('Mean DIA Source density in focal plane coordinates %s' % (title))
-    ax1.set_xlabel('Focal Plane X')
-    ax1.set_ylabel('Focal Plane Y')
+    ax1.set_xlabel('Focal Plane X', size=16)
+    ax1.set_ylabel('Focal Plane Y', size=16)
     ax1 = plt.gca()
     ax1.invert_yaxis()
     ax1.invert_xaxis()
@@ -285,7 +298,8 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, approxCcdArea=2.678,
 def loadTables(repo, dbName='association.db', isVerify=False,
                badFlagList=['base_PixelFlags_flag_bad',
                             'base_PixelFlags_flag_suspect',
-                            'base_PixelFlags_flag_saturatedCenter']):
+                            'base_PixelFlags_flag_saturatedCenter'],
+               cam='decam'):
     """Load DIA Object and DIA Source tables from an APDB.
 
     Parameters
@@ -300,6 +314,8 @@ def loadTables(repo, dbName='association.db', isVerify=False,
         If False, the APDB is in repo (default).
     badFlagList :  `list`
         Names of flags presumed to each indicate a DIA Source is garbage.
+    cam : `str`, one of either 'decam' or 'hsc', default is 'decam'
+        Needed to properly add the "ccd" and "visit" columns to the sourceTable.
 
     Returns
     -------
@@ -319,6 +335,7 @@ def loadTables(repo, dbName='association.db', isVerify=False,
         dbPath = os.path.abspath(os.path.join(repoUpOne, dbName))
     objTable = loadAllApdbObjects(dbPath)
     srcTable = loadAllApdbSources(dbPath)
+    srcTable = addVisitCcdToSrcTable(srcTable, cam=cam)
     flagTable, srcTableFlags, flagFilter, \
         goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList)
     return objTable, srcTable, goodObj, goodSrc
@@ -450,18 +467,24 @@ def plotSourceLocationsOnObject(objId, objTable, sourceTable, repo, goodSrc=None
     srcIds = list(sourceTable.loc[sourceTable['diaObjectId'] == objId, 'diaSourceId'].values)
     srcRas = sourceTable.loc[sourceTable['diaObjectId'] == objId, 'ra'].values
     srcDecs = sourceTable.loc[sourceTable['diaObjectId'] == objId, 'decl'].values
-    srcCcdVisitIds = sourceTable.loc[sourceTable['diaObjectId'] == objId, 'ccdVisitId'].values
-    dataIds = [{'visit': int(str(dataId)[0:6]), 'ccdnum': int(str(dataId)[6:])} for dataId in srcCcdVisitIds]
+    srcVisits = sourceTable.loc[sourceTable['diaObjectId'] == objId, 'visit'].values
+    srcCcds = sourceTable.loc[sourceTable['diaObjectId'] == objId, 'ccd'].values
+    dataIds = [{'visit': int(visit), 'ccd': int(ccd)} for (visit, ccd) in zip(srcVisits, srcCcds)]
 
     objLoc = lsst.geom.SpherePoint(objRa, objDec, lsst.geom.degrees)
     calexpFirst = butler.get('calexp', dataId=dataIds[0])
-    templateCutout = plc.getTemplateCutout(calexpFirst, repo, objLoc)
-    wcs = templateCutout.getWcs()
+    templateCutout = getTemplateCutout(calexpFirst, repo, objLoc)
+    if templateCutout is not None:
+        imageToShow = templateCutout
+    else:
+        imageToShow = calexpFirst.getCutout(objLoc, size=lsst.geom.Extent2I(30, 30))
+        print('Failed to retrieve template; image displayed is first processed image')
+    wcs = imageToShow.getWcs()
 
     disp = afwDisplay.Display(plotIdx, reopenPlot=True)
     disp.setMaskTransparency(100)
     disp.scale('asinh', 'zscale', Q=4)
-    disp.mtv(templateCutout, title=objId)
+    disp.mtv(imageToShow, title=objId)
 
     with disp.Buffering():  # obviously
         coordObj = wcs.skyToPixel(objLoc)
@@ -469,7 +492,7 @@ def plotSourceLocationsOnObject(objId, objTable, sourceTable, repo, goodSrc=None
         for dataId, srcId, ra, dec in zip(dataIds, srcIds, srcRas, srcDecs):
             calexp = butler.get('calexp', dataId=dataId)
             psf = calexp.getPsf()
-            psfSize = psf.computeShape().getDeterminantRadius()
+            psfSize = psf.computeShape().getDeterminantRadius()*2.355  # sigma to FWHM
             coordSrc = wcs.skyToPixel(lsst.geom.SpherePoint(ra, dec, lsst.geom.degrees))
             if goodSrc is not None:
                 if srcId in goodSrc['diaSourceId'].values:
@@ -502,7 +525,6 @@ def plotSeeingHistogram(repo, sourceTable, ccd=35, ccdXcenter=1000,
         Title for the plot, optional.
     """
     fwhm = pd.DataFrame()
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
     butler = dafPersist.Butler(repo)
     visits = np.unique(sourceTable['visit'])
     radii = []
@@ -540,13 +562,13 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='')
     title : `str`
         String to append to the plot title, optional.
     """
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
     butler = dafPersist.Butler(repo)
-    corners = getCcdCorners(butler, sourceTable, ccdMin=1, ccdMax=63)
+    camera = butler.get('camera')
+    corners = getCcdCorners(butler, sourceTable)
     xFP_list = []
     yFP_list = []
     for index, row in sourceTable.iterrows():
-        xFP, yFP = ccd2focalPlane(row['x'], row['y'], row['ccd'], butler=butler)
+        xFP, yFP = ccd2focalPlane(row['x'], row['y'], row['ccd'], camera=camera)
         xFP_list.append(xFP)
         yFP_list.append(yFP)
     sourceTable['xFP'] = pd.Series(xFP_list, index=sourceTable.index)
@@ -566,8 +588,8 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='')
     ax1.hexbin(sourceTable['yFP'], sourceTable['xFP'], gridsize=gridsize, bins='log', cmap='Blues')
     ax1.set_title('DIA Sources in focal plane coordinates %s' % (title))
 
-    ax1.set_xlabel('Focal Plane X')
-    ax1.set_ylabel('Focal Plane Y')
+    ax1.set_xlabel('Focal Plane X', size=16)
+    ax1.set_ylabel('Focal Plane Y', size=16)
     ax1.invert_yaxis()
     ax1.invert_xaxis()
 
@@ -584,7 +606,6 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable):
     title : `str`
         String to append to the plot title, optional.
     """
-    sourceTable = addVisitCcdToSrcTable(sourceTable)
     fig = plt.figure(figsize=(9, 10))
     for count, visit in enumerate(np.unique(sourceTable['visit'].values)):
         idx = sourceTable.visit == visit

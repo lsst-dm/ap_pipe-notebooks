@@ -26,7 +26,7 @@ def main():
     try:
         repo = sys.argv[1]
         templateRepo = sys.argv[2]
-    except:
+    except IndexError:
         print('###')
         print('Run this script with 2-3 arguments: repo (required), \
                templateRepo (required), and dbName (optional)')
@@ -41,7 +41,7 @@ def main():
                       and nDiaSources > 5'  # and flags == 0'
         try:
             dbName = sys.argv[3]
-        except:
+        except IndexError:
             print('Using default dbName, association.db')
             dbName = 'association.db'
         finally:
@@ -169,41 +169,32 @@ def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.E
         A small image postage stamp cutout around the template source.
     """
     templateButler = dafPersist.Butler(templateRepo)
-    if 'Coadd' in templateDataType or 'coadd' in templateDataType:
-        skyMap = templateButler.get(datasetType=templateDataType + '_skyMap')
-        expWcs = scienceImage.getWcs()
-        expBoxD = lsst.geom.Box2D(scienceImage.getBBox())
-        expBoxD.grow(10)
-        ctrSkyPos = expWcs.pixelToSky(expBoxD.getCenter())
-        tractInfo = skyMap.findTract(ctrSkyPos)
-        skyCorners = [expWcs.pixelToSky(pixPos) for pixPos in expBoxD.getCorners()]
-        patchList = tractInfo.findPatchList(skyCorners)
-        for patchInfo in patchList:
-            templateDataId = dict(
-                tract=tractInfo.getId(),
-                patch="%s,%s" % (patchInfo.getIndex()[0], patchInfo.getIndex()[1]),
-                filter=filter,
-            )
-            try:
-                coaddTemplate = templateButler.get('deepCoadd', dataId=templateDataId)
-                templateCutout = coaddTemplate.getCutout(centerSource, size)
-            except:
-                continue
-            else:
-                # Only loop through patches until you find one containing the source
-                break
-    else:  # it's a calexp or an instcal; assume DECam for now
-        ccdnum = int(str(scienceImage.getInfo().getVisitInfo().getExposureId())[-2:])  # sorry
+    skyMap = templateButler.get(datasetType=templateDataType + '_skyMap')
+    expWcs = scienceImage.getWcs()
+    expBoxD = lsst.geom.Box2D(scienceImage.getBBox())
+    expBoxD.grow(10)
+    ctrSkyPos = expWcs.pixelToSky(expBoxD.getCenter())
+    tractInfo = skyMap.findTract(ctrSkyPos)
+    skyCorners = [expWcs.pixelToSky(pixPos) for pixPos in expBoxD.getCorners()]
+    patchList = tractInfo.findPatchList(skyCorners)
+    for patchInfo in patchList:
         templateDataId = dict(
+            tract=tractInfo.getId(),
+            patch="%s,%s" % (patchInfo.getIndex()[0], patchInfo.getIndex()[1]),
             filter=filter,
-            visit=templateVisit,
-            ccdnum=ccdnum,
         )
-        templateExposure = templateButler.get(templateDataType, dataId=templateDataId)
-        templateCutout = templateExposure.getCutout(centerSource, size)
+        try:
+            coaddTemplate = templateButler.get('deepCoadd', dataId=templateDataId)
+        except dafPersist.butlerExceptions.NoResults:
+            template = None
+            continue
+        else:
+            template = coaddTemplate.getCutout(centerSource, size)
+            # Only loop through patches until you find one containing the source
+            break
 
     print("Template dataId %s" % templateDataId)
-    return templateCutout
+    return template
 
 
 def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
@@ -299,7 +290,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     butler = dafPersist.Butler(repo)
     try:
         calexpFirst = butler.get('calexp', dataIdDicts[cutoutIdx])
-    except RuntimeError:
+    except dafPersist.butlerExceptions.NoResults:
         calexpFirst = butler.get('instcal', dataIdDicts[cutoutIdx])
     calexpArray = calexpFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
     calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
@@ -322,7 +313,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
                 templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource,
                                                    templateDataType=templateDataType,
                                                    templateVisit=visit)
-            except:
+            except dafPersist.butlerExceptions.NoResults:
                 continue  # loop through other possible visits
         templateArray = templateCutout.getMaskedImage().getImage().getArray()
         templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
@@ -349,7 +340,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
         for idx, dataId in enumerate(dataIdDicts):
             try:
                 calexp = butler.get('calexp', dataId)
-            except RuntimeError:
+            except dafPersist.butlerExceptions.NoResults:
                 calexp = butler.get('instcal', dataId)
             calexpArray = calexp.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
             calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
