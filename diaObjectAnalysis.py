@@ -15,7 +15,7 @@ def main():
     script = sys.argv[0]
     try:
         repo = sys.argv[1]
-    except:
+    except IndexError:
         print('###')
         print('Run this script with 1-2 arguments: repo (required) and dbName (optional)')
         print('Please note that dbName path must be relative to repo')
@@ -25,7 +25,7 @@ def main():
         rerunName = os.path.basename(os.path.normpath(repo))
         try:
             dbName = sys.argv[2]
-        except:
+        except IndexError:
             print('Using default dbName, association.db')
             print('Loading APDB...')
             objTable = loadAllApdbObjects(repo)
@@ -49,15 +49,13 @@ def main():
             print('Figures saved to {0} and {1}'.format(histName, skyName))
 
 
-def loadAllApdbObjects(repo, dbName='association.db'):
+def loadAllApdbObjects(dbPath):
     """Load select DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
-    repo : `str`
-        Path to an output repository from an ap_pipe run.
-    dbName : `str`, optional
-        Name of the APDB, which must reside in (or relative to) repo.
+    dbPath : `str`
+        Path to the APDB.
 
     Returns
     -------
@@ -65,7 +63,7 @@ def loadAllApdbObjects(repo, dbName='association.db'):
         DIA Object Table containing only objects with validityEnd NULL.
         Columns selected are presently hard-wired here.
     """
-    connection = sqlite3.connect(os.path.join(repo, dbName))
+    connection = sqlite3.connect(dbPath)
 
     # These are some of the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
@@ -77,23 +75,20 @@ def loadAllApdbObjects(repo, dbName='association.db'):
     return objTable
 
 
-def loadAllApdbSources(repo, dbName='association.db'):
+def loadAllApdbSources(dbPath):
     """Load select columns from all DIASources from a APDB into a pandas dataframe.
 
     Parameters
     ----------
-    repo : `str`
-        Path to an output repository from an ap_pipe run.
-    dbName : `str`, optional
-        Name of the APDB, which must reside in (or relative to) repo.
-        dbPath):
+    dbPath : `str`
+        Path to the APDB.
 
     Returns
     -------
     srcTable : `pandas.DataFrame`
         DIA Source Table including the columns hard-wired below.
     """
-    connection = sqlite3.connect(os.path.join(repo, dbName))
+    connection = sqlite3.connect(dbPath)
 
     # These are some of the tables available in the APDB
     tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
@@ -102,7 +97,8 @@ def loadAllApdbSources(repo, dbName='association.db'):
     srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, \
                                   ra, decl, ccdVisitId, \
                                   midPointTai, apFlux, psFlux, apFluxErr, \
-                                  psFluxErr, totFlux, totFluxErr, flags from {0} \
+                                  psFluxErr, totFlux, totFluxErr, x, y, \
+                                  ixxPSF, iyyPsf, ixyPSF, flags from {0} \
                                   '.format(tables['src']), connection)
     return srcTable
 
@@ -129,38 +125,42 @@ def setObjectFilter(objTable):
     return objFilter
 
 
-def plotDiaObjectHistogram(rerunName, objTable, objFilter):
-    """Create a histogram showing all DIAObjects and filtered DIAObjects.
+def plotDiaObjectHistogram(objTable, objFiltered,
+                           label1='All Objects', label2='Filtered Objects', title=''):
+    """Create a histogram showing how many DIA Sources comprise the DIA Objects.
 
     Parameters
     ----------
-    rerunName : `str`
-        Name of the directory at the end of the repo path.
     objTable : `pandas.DataFrame`
         DIA Object Table.
-    objFilter : `pandas.Series` of `bool`
-        Filter applied to create a subset (e.g., quality cut) from objTable.
+    objFiltered : `pandas.core.frame.DataFrame`
+        DIA Object Table that is a filtered subset of objTable.
+    label1 : `str`
+        Legend label for the first DIA Object Table.
+    label2 : `str`
+        Legend label for the second (filtered) DIA Object Table.
+    title : `str`
+        Title for the plot, optional.
 
     Returns
     -------
     fig : `matplotlib.figure.Figure`
-        Histogram of all DIAObjects in objTable with a histogram of the
-        subset described by objFilter plotted on top.
+        Histogram of DIA Objects showing number of constituent DIA Sources.
     """
     fig = plt.figure()
     plt.xlabel('Number of Sources per Object', size=16)
     plt.ylabel('Object count', size=16)
-    plt.title(rerunName, size=16)
     plt.ylim(0.7, 1e5)
     plt.yscale('log')
     binMax = np.max(objTable['nDiaSources'].values)
     plt.hist(objTable['nDiaSources'].values, bins=np.arange(0, binMax),
-             color='#2979C1', label='All Objects')
-    plt.hist(objTable.loc[objFilter, 'nDiaSources'].values, bins=np.arange(0, binMax),
-             color='#Bee7F5', label='Filtered Objects')
+             color='#2979C1', label=label1)
+    plt.hist(objFiltered['nDiaSources'].values, bins=np.arange(0, binMax),
+             color='#Bee7F5', label=label2)
     plt.legend(frameon=False, fontsize=16)
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
+    plt.title(title)
     return fig
 
 
@@ -252,6 +252,7 @@ def plotDiaObjectsOnSky(rerunName, objTable, objFilter, hits):
                     np.max(objTable.loc[objFilter, 'nDiaSources']))
         cb.solids.set_edgecolor("face")
     return fig
+
 
 if __name__ == '__main__':
     main()
