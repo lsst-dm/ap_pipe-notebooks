@@ -208,10 +208,10 @@ def getCcdCorners(butler, sourceTable):
     cornerList = []
     visits = np.unique(sourceTable['visit'])
     ccds = np.unique(sourceTable['ccd'])
-    ccdMin = np.min(ccds)
-    ccdMax = np.max(ccds)
+    ccdMin = int(np.min(ccds))
+    ccdMax = int(np.max(ccds))
     visit = int(visits[0])  # shouldn't matter what visit we use
-    for ccd in range(ccdMin, ccdMax):
+    for ccd in range(ccdMin, ccdMax+1):
         try:
             bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
         except dafPersist.NoResults:  # silently skip any ccds that don't exist
@@ -260,6 +260,8 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
         String to append to the plot title, optional.
     """
     ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable)
+    ccds = np.unique(sourceTable['ccd'])
+    ccdMax = int(np.max(ccds))
     nVisits = len(np.unique(sourceTable['visit'].values))
     ccdGroup = sourceTable.groupby('ccd')
     ccdSourceCount = ccdGroup.visit.count().values/nVisits/ccdArea
@@ -273,9 +275,12 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
 
     for index, row in corners.iterrows():
         try:
-            averageFocalPlane = ccdGroup.get_group(int(row[1])).x.count()/nVisits/ccdArea
+            if ccdMax < 100:  # it's DECam
+                averageFocalPlane = ccdGroup.get_group('%02d' % row[1]).x.count()/nVisits/ccdArea
+            else:  # it's HSC
+                averageFocalPlane = ccdGroup.get_group(int(row[1])).x.count()/nVisits/ccdArea
         except KeyError:
-            averageFocalPlane = 0
+            averageFocalPlane = 0  # plot normalization will be weird but it won't fall over
         ax1.add_patch(patches.Rectangle((row[7], row[6]),
                       -row.height,
                       -row.width,
@@ -503,8 +508,7 @@ def plotSourceLocationsOnObject(objId, objTable, sourceTable, repo, goodSrc=None
                 disp.dot('o', *coordSrc, ctype='C0', size=psfSize)  # blue
 
 
-def plotSeeingHistogram(repo, sourceTable, ccd=35, ccdXcenter=1000,
-                        ccdYcenter=2000, pixelScale=0.26, title=''):
+def plotSeeingHistogram(repo, sourceTable, ccd=35):
     """Plot distribution of visit seeing.
 
     Parameters
@@ -514,15 +518,7 @@ def plotSeeingHistogram(repo, sourceTable, ccd=35, ccdXcenter=1000,
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
     ccd : `int`
-        The ccd being considered.
-    ccdXcenter : `int`
-        Pixel center of ccd in x-direction (e.g., 1000 for 2000x4000 ccd).
-    ccdYcenter : `int`
-        Pixel center of ccd in y-direction (e.g., 2000 for 2000x4000 ccd).
-    pixelScale : `float`
-        Pixel scale of the instrument in arcseconds per pixel, default 0.26.
-    title : `str`
-        Title for the plot, optional.
+        The ccd being considered, default 35.
     """
     fwhm = pd.DataFrame()
     butler = dafPersist.Butler(repo)
@@ -532,20 +528,17 @@ def plotSeeingHistogram(repo, sourceTable, ccd=35, ccdXcenter=1000,
         miniCalexp = butler.get('calexp_sub', visit=int(visit),
                                 ccd=ccd, bbox=lsst.geom.Box2I())
         psf = miniCalexp.getPsf()
-        shape = psf.computeShape(lsst.geom.Point2D(ccdXcenter, ccdYcenter))
-        radii.append(shape.getDeterminantRadius()*2.355)  # convert sigma to FWHM
+        psfSize = psf.computeShape().getDeterminantRadius()
+        radii.append(psfSize*2.355)  # convert sigma to FWHM
     fwhm['visit'] = pd.Series(visits)
     fwhm['radius'] = pd.Series(radii, index=fwhm.index)
-
-    plt.figure(figsize=(6, 8))
-    plt.subplot(211)
-    plt.hist(fwhm['radius'].values*pixelScale, alpha=0.5)
-    plt.xlabel('Seeing FWHM (arcseconds)')
-    plt.ylabel('Visit count')
-    plt.subplot(212)
+    pixelScale = miniCalexp.getWcs().getPixelScale().asArcseconds()  # same for all visits
+    fig, ax = plt.subplots(figsize=(6, 4))
     plt.hist(fwhm['radius'].values, alpha=0.5)
     plt.xlabel('Seeing FWHM (pixels)')
     plt.ylabel('Visit count')
+    secax = ax.secondary_xaxis('top', functions=(lambda x: x*pixelScale, lambda x: x/pixelScale))
+    secax.set_xlabel('Seeing FWHM (arcseconds)')
 
 
 def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title=''):
@@ -606,10 +599,16 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable):
     title : `str`
         String to append to the plot title, optional.
     """
-    fig = plt.figure(figsize=(9, 10))
+    visits = np.unique(sourceTable['visit'])
+    nVisits = len(visits)
+    if np.floor(np.sqrt(nVisits)) - np.sqrt(nVisits) == 0:
+        squareGridSize = np.int(np.sqrt(nVisits))
+    else:
+        squareGridSize = np.int(np.sqrt(nVisits)) + 1
+    fig = plt.figure(figsize=(9, 9))
     for count, visit in enumerate(np.unique(sourceTable['visit'].values)):
         idx = sourceTable.visit == visit
-        ax = fig.add_subplot(10, 10, count + 1, aspect='equal')
+        ax = fig.add_subplot(squareGridSize, squareGridSize, count + 1, aspect='equal')
         ax.scatter(sourceTable.ra[idx], sourceTable.decl[idx], c='C0',
                    marker='.', s=0.1, alpha=0.2)
         ax.set_title(visit, size=8)
