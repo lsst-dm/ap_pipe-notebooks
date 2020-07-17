@@ -237,8 +237,8 @@ def getCcdAndVisitSizeOnSky(repo, sourceTable):
     visits = np.unique(sourceTable.visit)
     ccds = np.unique(sourceTable.ccd)
     nGoodCcds = len(ccds)
-    calexp = butler.get('calexp', visit=int(visits[0]), ccd=47)
-    bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=47)
+    calexp = butler.get('calexp', visit=int(visits[0]), ccd=int(ccds[0]))
+    bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=int(ccds[0]))
     pixelScale = calexp.getWcs().getPixelScale().asArcseconds()
     ccdArea = (pixelScale*pixelScale*bbox.getArea()*u.arcsec**2).to(u.deg**2).value
     visitArea = ccdArea * nGoodCcds
