@@ -300,7 +300,7 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
     cb.set_label('DIA Sources per sq. deg.', rotation=90)
 
 
-def loadTables(repo, dbName='association.db', isVerify=False,
+def loadTables(repo, dbName='association.db', isVerify=False, dbType='sqlite',
                badFlagList=['base_PixelFlags_flag_bad',
                             'base_PixelFlags_flag_suspect',
                             'base_PixelFlags_flag_saturatedCenter'],
@@ -333,13 +333,18 @@ def loadTables(repo, dbName='association.db', isVerify=False,
     goodSrc : `pandas.core.frame.DataFrame`
         A subset of srcTable containing only good DIA Sources.
     """
-    if not isVerify:  # APDB is in repo (default)
+    if dbType == 'sqlite' and not isVerify:  # APDB is in repo (default)
         dbPath = os.path.abspath(os.path.join(repo, dbName))
-    else:  # APDB is one level above repo
+    elif dbType == 'sqlite' and isVerify:  # APDB is one level above repo (ap_verify sqlite case)
         repoUpOne = os.path.dirname(repo)
         dbPath = os.path.abspath(os.path.join(repoUpOne, dbName))
-    objTable = loadAllApdbObjects(dbPath)
-    srcTable = loadAllApdbSources(dbPath)
+    elif dbType == 'postgres':
+        dbPath = dbName
+    else:
+        raise ValueError('database type not understood')
+
+    objTable = loadAllApdbObjects(dbPath, dbType=dbType)
+    srcTable = loadAllApdbSources(dbPath, dbType=dbType)
     srcTable = addVisitCcdToSrcTable(srcTable, cam=cam)
     flagTable, srcTableFlags, flagFilter, \
         goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList)
