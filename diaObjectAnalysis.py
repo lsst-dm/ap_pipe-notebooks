@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as plticker
 import pandas as pd
 import sqlite3
+import psycopg2
 
 """Script to make plots of DIAObjects using a Alert Production Database
 (APDB) resulting from a run of ap_pipe.
@@ -49,13 +50,16 @@ def main():
             print('Figures saved to {0} and {1}'.format(histName, skyName))
 
 
-def loadAllApdbObjects(dbPath):
+def loadAllApdbObjects(dbName, dbType='sqlite'):
     """Load select DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
-    dbPath : `str`
-        Path to the APDB.
+    dbName : `str`
+        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+
+    dbType : `str`, one of 'sqlite' or 'postgres'
 
     Returns
     -------
@@ -63,42 +67,63 @@ def loadAllApdbObjects(dbPath):
         DIA Object Table containing only objects with validityEnd NULL.
         Columns selected are presently hard-wired here.
     """
-    connection = sqlite3.connect(dbPath)
+    if dbType == 'sqlite':
+        connection = sqlite3.connect(dbName)
+    elif dbType == 'postgres':
+        host = 'lsst-pg-devel1.ncsa.illinois.edu'
+        connection = psycopg2.connect(dbname=dbName, host=host)
+    else:
+        raise ValueError('dbType must be sqlite or postgres')
 
     # These are some of the tables available in the APDB
-    tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
+    tables = {'obj': '"DiaObject"', 'src': '"DiaSource"',
+              'sso': '"SSObject"', 'forcedsrc': '"DiaForcedSource"',
+              'proto': '"ApdbProtoVisits"', 'match': '"DiaObject_To_Object_Match"'}
 
     # Only get objects with validityEnd NULL because that means they are still valid
-    objTable = pd.read_sql_query('select diaObjectId, ra, decl, nDiaSources, \
-                                  gPSFluxMean, validityEnd, flags from {0} \
-                                  where validityEnd is NULL;'.format(tables['obj']), connection)
+    objTable = pd.read_sql_query('select "diaObjectId", "ra", "decl", "nDiaSources", \
+                                  "gPSFluxMean", "validityEnd", "flags" from {0} \
+                                  where "validityEnd" is NULL;'.format(tables['obj']), connection)
     return objTable
 
 
-def loadAllApdbSources(dbPath):
+def loadAllApdbSources(dbName, dbType='sqlite'):
     """Load select columns from all DIASources from a APDB into a pandas dataframe.
 
     Parameters
     ----------
-    dbPath : `str`
-        Path to the APDB.
+    dbName : `str`
+        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+
+    dbType : `str`, one of 'sqlite' or 'postgres'
 
     Returns
     -------
     srcTable : `pandas.DataFrame`
         DIA Source Table including the columns hard-wired below.
     """
-    connection = sqlite3.connect(dbPath)
+    if dbType == 'sqlite':
+        connection = sqlite3.connect(dbName)
+    elif dbType == 'postgres':
+        host = 'lsst-pg-devel1.ncsa.illinois.edu'
+        connection = psycopg2.connect(dbname=dbName, host=host)
+    else:
+        raise ValueError('dbType must be sqlite or postgres')
 
     # These are some of the tables available in the APDB
-    tables = {'obj': 'DiaObject', 'src': 'DiaSource'}
+    # These are some of the tables available in the APDB
+    tables = {'obj': '"DiaObject"', 'src': '"DiaSource"',
+              'sso': '"SSObject"', 'forcedsrc': '"DiaForcedSource"',
+              'proto': '"ApdbProtoVisits"', 'match': '"DiaObject_To_Object_Match"'}
 
     # Load data from the source table
-    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, \
-                                  ra, decl, ccdVisitId, \
-                                  midPointTai, apFlux, psFlux, apFluxErr, \
-                                  psFluxErr, totFlux, totFluxErr, x, y, \
-                                  ixxPSF, iyyPsf, ixyPSF, flags from {0} \
+    # currently not loading iyyPSF due to query error
+    srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
+                                  "ra", "decl", "ccdVisitId", \
+                                  "midPointTai", "apFlux", "psFlux", "apFluxErr", \
+                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
+                                  "ixxPSF", "ixyPSF", "flags" from {0}; \
                                   '.format(tables['src']), connection)
     return srcTable
 
