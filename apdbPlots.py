@@ -592,7 +592,7 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='')
     ax1.invert_xaxis()
 
 
-def plotDiaSourcesOnSkyGrid(repo, sourceTable):
+def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0'):
     """Make a multi-panel plot of DIA Sources for each visit on the sky.
 
     Parameters
@@ -602,7 +602,9 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable):
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
     title : `str`
-        String to append to the plot title, optional.
+        String for overall figure title, optional.
+    color : `str`
+        Color to use for the scatter plot, optional (default is C0 blue).
     """
     visits = np.unique(sourceTable['visit'])
     nVisits = len(visits)
@@ -614,7 +616,7 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable):
     for count, visit in enumerate(np.unique(sourceTable['visit'].values)):
         idx = sourceTable.visit == visit
         ax = fig.add_subplot(squareGridSize, squareGridSize, count + 1, aspect='equal')
-        ax.scatter(sourceTable.ra[idx], sourceTable.decl[idx], c='C0',
+        ax.scatter(sourceTable.ra[idx], sourceTable.decl[idx], c=color,
                    marker='.', s=0.1, alpha=0.2)
         ax.set_title(visit, size=8)
         ax.invert_xaxis()
@@ -622,3 +624,5 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable):
         ax.get_yaxis().set_visible(False)
     fig.tight_layout()
     plt.subplots_adjust(wspace=0)
+    if title:
+        fig.suptitle(title)
