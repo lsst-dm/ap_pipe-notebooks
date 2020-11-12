@@ -82,7 +82,8 @@ def loadAllApdbObjects(dbName, dbType='sqlite'):
 
     # Only get objects with validityEnd NULL because that means they are still valid
     objTable = pd.read_sql_query('select "diaObjectId", "ra", "decl", "nDiaSources", \
-                                  "gPSFluxMean", "validityEnd", "flags" from {0} \
+                                  "gPSFluxMean", "rPSFluxMean", "iPSFluxMean", \
+                                  "zPSFluxMean", "yPSFluxMean", "validityEnd", "flags" from {0} \
                                   where "validityEnd" is NULL;'.format(tables['obj']), connection)
     return objTable
 
@@ -123,7 +124,7 @@ def loadAllApdbSources(dbName, dbType='sqlite'):
                                   "ra", "decl", "ccdVisitId", \
                                   "midPointTai", "apFlux", "psFlux", "apFluxErr", \
                                   "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
-                                  "ixxPSF", "ixyPSF", "flags" from {0}; \
+                                  "ixxPSF", "ixyPSF", "flags", "filterName" from {0}; \
                                   '.format(tables['src']), connection)
     return srcTable
 
