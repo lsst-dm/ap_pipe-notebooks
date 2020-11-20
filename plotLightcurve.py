@@ -10,6 +10,7 @@ from astropy.visualization import (ZScaleInterval, SqrtStretch, ImageNormalize)
 import lsst.daf.persistence as dafPersist
 import lsst.afw.display as afwDisplay
 import lsst.geom
+import lsst.pex.exceptions
 
 """Script to make light curve plots for DIAObjects using a Alert Production
 Database (APDB) resulting from a run of ap_pipe.
@@ -189,7 +190,11 @@ def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.E
             template = None
             continue
         else:
-            template = coaddTemplate.getCutout(centerSource, size)
+            try:
+                template = coaddTemplate.getCutout(centerSource, size)
+            except lsst.pex.exceptions.InvalidParameterError:
+                template = None
+                continue
             # Only loop through patches until you find one containing the source
             break
 
