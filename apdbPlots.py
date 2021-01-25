@@ -9,10 +9,12 @@ import operator
 from astropy import units as u
 
 import lsst.daf.persistence as dafPersist
+import lsst.daf.butler as dafButler
 import lsst.afw.display as afwDisplay
 import lsst.geom
 from lsst.ap.association import MapDiaSourceConfig, UnpackApdbFlags
 import lsst.afw.cameraGeom as cameraGeom
+from lsst.obs.decam import DarkEnergyCamera
 
 from diaObjectAnalysis import loadAllApdbObjects, loadAllApdbSources
 from plotLightcurve import getTemplateCutout
@@ -100,7 +102,7 @@ def plot2axes(x1, y1, x2, y2, xlabel, ylabel1, ylabel2, y1err=None, y2err=None, 
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
 
 
-def plotDiaSourcesPerVisit(repo, sourceTable, title=''):
+def plotDiaSourcesPerVisit(repo, sourceTable, title='', gen='gen2', instrument='DECam', collections=[]):
     """Plot DIA Sources per visit.
 
     The plot will have two y-axes: number of DIA Sources per square degree and
@@ -114,8 +116,14 @@ def plotDiaSourcesPerVisit(repo, sourceTable, title=''):
         Pandas dataframe with DIA Sources from an APDB.
     title : `str`
         Title for the plot, optional.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list`, optional
+        Must be provided for gen3 to load the camera properly
     """
-    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable)
+    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable, gen, instrument, collections)
     traceRadius = np.sqrt(0.5) * np.sqrt(sourceTable.ixxPSF + sourceTable.iyyPSF)
     sourceTable['seeing'] = 2*np.sqrt(2*np.log(2)) * traceRadius
     visitGroup = sourceTable.groupby('visit')
@@ -190,15 +198,21 @@ def ccd2focalPlane(x, y, ccd, camera):
     return point[0], point[1]
 
 
-def getCcdCorners(butler, sourceTable):
+def getCcdCorners(butler, sourceTable, gen='gen2', instrument='DECam', collections=[]):
     """Get corner coordinates for a range of ccds.
 
     Parameters
     ----------
-    butler : `lsst.daf.persistence.Butler`
+    butler : `lsst.daf.persistence.Butler` or `lsst.daf.butler.Butler`
         Butler in the repository corresponding to the output of an ap_pipe run.
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list`, optional
+        Must be provided for gen3 to load the camera properly
 
     Returns
     -------
@@ -213,17 +227,27 @@ def getCcdCorners(butler, sourceTable):
     visit = int(visits[0])  # shouldn't matter what visit we use
     for ccd in range(ccdMin, ccdMax+1):
         try:
-            bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
-        except dafPersist.NoResults:  # silently skip any ccds that don't exist
+            if gen == 'gen2':
+                bbox = butler.get('calexp_bbox', dataId={visit: visit, ccd: ccd})
+            else:  # gen3
+                bbox = butler.get('calexp.bbox', collections=collections,
+                                  instrument=instrument, visit=visit, detector=ccd)
+        except (dafPersist.NoResults, LookupError):  # silently skip any ccds that don't exist
             for visit in visits[1:]:  # try the other visits just in case
                 visit = int(visit)
                 try:
                     bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
-                except dafPersist.NoResults:
+                except (dafPersist.NoResults, LookupError):
                     continue
                 break
         else:
-            camera = butler.get('camera')
+            if gen == 'gen2':
+                camera = butler.get('camera')
+            else:  # gen3
+                if instrument == 'DECam':
+                    camera = DarkEnergyCamera().getCamera()
+                else:
+                    raise NotImplementedError
             cornerList.append([visit, ccd] + [val for pair in bbox.getCorners()
                               for val in ccd2focalPlane(pair[0], pair[1], ccd, camera)])
     corners = pd.DataFrame(cornerList)
@@ -232,20 +256,50 @@ def getCcdCorners(butler, sourceTable):
     return corners
 
 
-def getCcdAndVisitSizeOnSky(repo, sourceTable):
-    butler = dafPersist.Butler(repo)
+def getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen2', instrument='DECam', collections=[]):
+    """Estimate the area of one CCD and one visit on the sky, in square degrees.
+
+    Parameters
+    ----------
+    repo : `str`
+        Repository corresponding to the output of an ap_pipe run.
+    sourceTable : `pandas.core.frame.DataFrame`
+        Pandas dataframe with DIA Sources from an APDB.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list`, optional
+        Must be provided for gen3 to load the camera properly
+
+    Returns
+    -------
+    ccdArea : `float`
+        Area covered by one detector (CCD) on the sky, in square degrees
+    visitArea :
+        Area covered by a visit with all detectors (CCDs) on the sky, in square degrees
+    """
     visits = np.unique(sourceTable.visit)
     ccds = np.unique(sourceTable.ccd)
     nGoodCcds = len(ccds)
-    calexp = butler.get('calexp', visit=int(visits[0]), ccd=int(ccds[0]))
-    bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=int(ccds[0]))
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+        calexp = butler.get('calexp', visit=int(visits[0]), ccd=int(ccds[0]))
+        bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=int(ccds[0]))
+    else:  # gen3
+        butler = dafButler.Butler(repo)
+        calexp = butler.get('calexp', collections=collections,
+                            instrument=instrument, visit=int(visits[0]), detector=int(ccds[0]))
+        bbox = butler.get('calexp.bbox', collections=collections,
+                          instrument=instrument, visit=int(visits[0]), detector=int(ccds[0]))
     pixelScale = calexp.getWcs().getPixelScale().asArcseconds()
     ccdArea = (pixelScale*pixelScale*bbox.getArea()*u.arcsec**2).to(u.deg**2).value
     visitArea = ccdArea * nGoodCcds
     return ccdArea, visitArea
 
 
-def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title=''):
+def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title='',
+                                     gen='gen2', instrument='DECam', collections=[]):
     """Plot average density of DIA Sources in the focal plane (per CCD).
 
     Parameters
@@ -258,16 +312,25 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
         Matplotlib colormap.
     title : `str`
         String to append to the plot title, optional.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list`, optional
+        Must be provided for gen3 to load the camera properly
     """
-    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable)
+    ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable, gen, instrument, collections)
     ccds = np.unique(sourceTable['ccd'])
     ccdMax = int(np.max(ccds))
     nVisits = len(np.unique(sourceTable['visit'].values))
     ccdGroup = sourceTable.groupby('ccd')
     ccdSourceCount = ccdGroup.visit.count().values/nVisits/ccdArea
     # DIA Source count per visit per square degree, for each CCD
-    butler = dafPersist.Butler(repo)
-    corners = getCcdCorners(butler, sourceTable)
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+    else:  # gen3
+        butler = dafButler.Butler(repo)
+    corners = getCcdCorners(butler, sourceTable, gen, instrument, collections)
     norm = mpl.colors.Normalize(vmin=np.min(ccdSourceCount), vmax=np.max(ccdSourceCount))
 
     fig1 = plt.figure(figsize=(8, 8))
@@ -546,7 +609,8 @@ def plotSeeingHistogram(repo, sourceTable, ccd=35):
     secax.set_xlabel('Seeing FWHM (arcseconds)')
 
 
-def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title=''):
+def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='',
+                               gen='gen2', instrument='DECam', collections=[]):
     """Plot DIA Source locations in the focal plane.
 
     Parameters
@@ -559,10 +623,23 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='')
         Number of hexagons in the (x, y) directions for the hexbin plot.
     title : `str`
         String to append to the plot title, optional.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list`, optional
+        Must be provided for gen3 to load the camera properly
     """
-    butler = dafPersist.Butler(repo)
-    camera = butler.get('camera')
-    corners = getCcdCorners(butler, sourceTable)
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+        camera = butler.get('camera')
+    else:
+        butler = dafButler.Butler(repo)
+        if instrument == 'DECam':
+            camera = DarkEnergyCamera().getCamera()
+        else:
+            raise NotImplementedError
+    corners = getCcdCorners(butler, sourceTable, gen, instrument, collections)
     xFP_list = []
     yFP_list = []
     for index, row in sourceTable.iterrows():
