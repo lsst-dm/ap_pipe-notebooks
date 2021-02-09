@@ -241,8 +241,8 @@ def mosaicCoadd(butler, patch_list, band='g', tract=0, ref_patch=None, sampling=
         m = patch.find(",")
         patch_x.append(int(patch[:m]))
         patch_y.append(int(patch[m+1:]))
-    x0 = min(patch_x)
-    y0 = min(patch_y)
+    x0 = min(patch_x) - 1
+    y0 = min(patch_y) - 1
     nx = max(patch_x) - x0 + 1
     ny = max(patch_y) - y0 + 1
 
