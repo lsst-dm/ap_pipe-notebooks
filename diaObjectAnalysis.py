@@ -50,28 +50,35 @@ def main():
             print('Figures saved to {0} and {1}'.format(histName, skyName))
 
 
-def loadAllApdbObjects(dbName, dbType='sqlite'):
-    """Load select DIAObject columns from a APDB into a pandas dataframe.
+def connectToApdb(dbName, dbType='sqlite', schema=None):
+    """Connect to an sqlite or postgres APDB.
 
     Parameters
     ----------
     dbName : `str`
-        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is sqlite, *full path* to the APDB on lsst-dev.
         If dbType is postgres, name of the APDB on lsst-pg-devel1.
-
-    dbType : `str`, one of 'sqlite' or 'postgres'
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
 
     Returns
     -------
-    objTable : `pandas.DataFrame`
-        DIA Object Table containing only objects with validityEnd NULL.
-        Columns selected are presently hard-wired here.
+    connection : `psycopg2.connect`
+        A connection object to a database instance, ready for queries
+    tables : `dict`
+        Hard-wired tables known to exist in the APDB
     """
     if dbType == 'sqlite':
         connection = sqlite3.connect(dbName)
     elif dbType == 'postgres':
+        if schema is None:
+            raise RuntimeError('Schema must be set for postgres APDB')
         host = 'lsst-pg-devel1.ncsa.illinois.edu'
-        connection = psycopg2.connect(dbname=dbName, host=host)
+        connection = psycopg2.connect(dbname=dbName,
+                                      host=host,
+                                      options=f'-c search_path={schema}')
     else:
         raise ValueError('dbType must be sqlite or postgres')
 
@@ -79,6 +86,30 @@ def loadAllApdbObjects(dbName, dbType='sqlite'):
     tables = {'obj': '"DiaObject"', 'src': '"DiaSource"',
               'sso': '"SSObject"', 'forcedsrc': '"DiaForcedSource"',
               'proto': '"ApdbProtoVisits"', 'match': '"DiaObject_To_Object_Match"'}
+
+    return connection, tables
+
+
+def loadAllApdbObjects(dbName, dbType='sqlite', schema=None):
+    """Load select DIAObject columns from a APDB into a pandas dataframe.
+
+    Parameters
+    ----------
+    dbName : `str`
+        If dbType is sqlite, *full path* to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
+
+    Returns
+    -------
+    objTable : `pandas.DataFrame`
+        DIA Object Table containing only objects with validityEnd NULL.
+        Columns selected are presently hard-wired here.
+    """
+    connection, tables = connectToApdb(dbName, dbType, schema)
 
     # Only get objects with validityEnd NULL because that means they are still valid
     objTable = pd.read_sql_query('select "diaObjectId", "ra", "decl", "nDiaSources", \
@@ -88,7 +119,7 @@ def loadAllApdbObjects(dbName, dbType='sqlite'):
     return objTable
 
 
-def loadAllApdbSources(dbName, dbType='sqlite'):
+def loadAllApdbSources(dbName, dbType='sqlite', schema=None):
     """Load select columns from all DIASources from a APDB into a pandas dataframe.
 
     Parameters
@@ -96,35 +127,24 @@ def loadAllApdbSources(dbName, dbType='sqlite'):
     dbName : `str`
         If dbType is sqlite, full filepath to the APDB on lsst-dev.
         If dbType is postgres, name of the APDB on lsst-pg-devel1.
-
-    dbType : `str`, one of 'sqlite' or 'postgres'
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
 
     Returns
     -------
     srcTable : `pandas.DataFrame`
         DIA Source Table including the columns hard-wired below.
     """
-    if dbType == 'sqlite':
-        connection = sqlite3.connect(dbName)
-    elif dbType == 'postgres':
-        host = 'lsst-pg-devel1.ncsa.illinois.edu'
-        connection = psycopg2.connect(dbname=dbName, host=host)
-    else:
-        raise ValueError('dbType must be sqlite or postgres')
-
-    # These are some of the tables available in the APDB
-    # These are some of the tables available in the APDB
-    tables = {'obj': '"DiaObject"', 'src': '"DiaSource"',
-              'sso': '"SSObject"', 'forcedsrc': '"DiaForcedSource"',
-              'proto': '"ApdbProtoVisits"', 'match': '"DiaObject_To_Object_Match"'}
+    connection, tables = connectToApdb(dbName, dbType, schema)
 
     # Load data from the source table
-    # currently not loading iyyPSF due to query error
     srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
                                   "ra", "decl", "ccdVisitId", \
                                   "midPointTai", "apFlux", "psFlux", "apFluxErr", \
                                   "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
-                                  "ixxPSF", "ixyPSF", "flags", "filterName" from {0}; \
+                                  "ixxPSF", "iyyPSF", "ixyPSF", "flags", "filterName" from {0}; \
                                   '.format(tables['src']), connection)
     return srcTable
 
