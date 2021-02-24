@@ -5,12 +5,16 @@ from astropy.visualization import (ZScaleInterval, SqrtStretch, ImageNormalize)
 
 from lsst.pipe.base import Struct
 import lsst.daf.persistence as dafPersist
+import lsst.daf.butler as dafButler
 
 __all__ = ("getPatchConstituents", "plotTractOutline", "mosaicCoadd")
 
 
-def getPatchConstituents(repo, band='g', printConstituents=False, verbose=False):
-    """Learn which patches have data in them, and what dataIds (i.e., processed exposures) comprise each patch
+def getPatchConstituents(repo, band='g', printConstituents=False, verbose=False,
+                         tractIndex=0, gen='gen2', instrument='DECam', collections=[],
+                         skymapName=''):
+    """Learn which patches have data in them, and what dataIds (i.e.,
+    visits/exposures and detectors) comprise each patch.
 
     Parameters
     ----------
@@ -22,6 +26,16 @@ def getPatchConstituents(repo, band='g', printConstituents=False, verbose=False)
         Select whether to print detailed information on each patch that has data.
     verbose : `bool`, optional
         Select whether to print all the patches with and without data.
+    tractIndex : `int`, optional
+        Tract index, default 0
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list` or `str`, optional
+        Must be provided for gen3 to load the camera properly
+    skymapName : `str`, optional
+        Must be provided for gen3 to load the skymap. e.g., 'hsc_rings_v1'
 
     Returns
     -------
@@ -32,18 +46,34 @@ def getPatchConstituents(repo, band='g', printConstituents=False, verbose=False)
     constituentCountList : `list` of `int`
         The number of visits that contributed to each patch.
     """
-    butler = dafPersist.Butler(repo)
-    skymap = butler.get('deepCoadd_skyMap', dataId={'filter': band})
-    tractInfo = skymap[0]  # implicitly assumes there is just 1 tract
-    everyPatchList = [str(patch.getIndex()[0]) + ',' + str(patch.getIndex()[1]) for patch in tractInfo]
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+        skymap = butler.get('deepCoadd_skyMap', dataId={'filter': band})
+        tract = skymap[tractIndex]  # implicitly assumes there is just 1 tract
+        everyPatchList = [str(patch.getIndex()[0]) + ',' + str(patch.getIndex()[1]) for patch in tract]
+    else:  # gen3
+        if not collections:
+            raise ValueError('One or more collections is required in gen3.')
+        if not skymapName:
+            raise ValueError('A skymap is required in gen3.')
+        if not instrument:
+            raise ValueError('An instrument is required in gen3.')
+        butler = dafButler.Butler(repo, collections=collections)
+        skymap = butler.get('skyMap', instrument=instrument, collections='skymaps', skymap=skymapName)
+        tract = skymap.generateTract(tractIndex)
+        everyPatchList = [tract.getSequentialPatchIndex(tract[idx]) for idx in range(len(tract))]
     dataPatchList = []
     constituentList = []
     constituentCountList = []
     for patch in everyPatchList:
         try:
-            dataIdPatch = {'filter': band, 'tract': 0, 'patch': patch}
+            if gen == 'gen2':
+                dataIdPatch = {'filter': band, 'tract': 0, 'patch': patch}
+            else:  # gen3
+                dataIdPatch = {'band': band, 'tract': tractIndex, 'patch': int(patch),
+                               'instrument': instrument, 'skymap': skymapName}
             coadd_test = butler.get('deepCoadd', dataId=dataIdPatch)
-        except:
+        except (dafPersist.NoResults, LookupError):
             if verbose:
                 print('No data in this patch', patch)
             continue
@@ -82,7 +112,7 @@ def bboxToRaDec(bbox, wcs):
 
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
-                            decMin=90.0, decMax=-90.0):
+                            decMin=90.0, decMax=-90.0, gen='gen2'):
     """Find the max and min RA and DEC (deg) boundaries encompased in the patchList
     Parameters
     ----------
@@ -98,13 +128,20 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
        Initiate minimum[maximum] RA determination at raMin[raMax] (deg)
     decMin, decMax : `float`
        Initiate minimum[maximum] DEC determination at decMin[decMax] (deg)
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+
     Returns
     -------
     `lsst.pipe.base.Struct`
        Contains the ra and dec min and max values for the patchList provided
     """
     for ip, patch in enumerate(tractInfo):
-        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+        if gen == 'gen2':
+            patchWithData = str(patch.getIndex()[0])+","+str(patch.getIndex()[1])
+        else:  # gen3
+            patchWithData = tractInfo.getSequentialPatchIndex(patch)
+        if patchWithData in patchList:
             raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
             raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
             raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
@@ -118,7 +155,7 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
     )
 
 
-def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPatch=1.5):
+def plotTractOutline(tractInfo, patchList, axes=None, fontSize=10, maxDegBeyondPatch=1.5, gen='gen2'):
     """Plot the the outline of the tract and patches highlighting those with data
     As some skyMap settings can define tracts with a large number of patches, this can
     become very crowded.  So, if only a subset of patches are included, find the outer
@@ -135,6 +172,8 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
        Font size for plot labels.
     maxDegBeyondPatch : `float`
        Maximum number of degrees to plot beyond the border defined by all patches with data to be plotted.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
     """
     def percent(values, p=0.5):
         """Return a value a fraction of the way between the min and max values in a list.
@@ -143,7 +182,7 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
         return min(values) + p*interval
 
     if axes is None:
-        fig = plt.figure(figsize=(10, 10))
+        fig = plt.figure(figsize=(8, 8))
         axes = fig.gca()
     buff = 0.02
     axes.tick_params(which="both", direction="in", labelsize=fontSize)
@@ -151,7 +190,7 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
     axes.ticklabel_format(useOffset=False)
 
     tractRa, tractDec = bboxToRaDec(tractInfo.getBBox(), tractInfo.getWcs())
-    patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch)
+    patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch, gen=gen)
 
     xMin = min(max(tractRa), patchBoundary.raMax) + buff
     xMax = max(min(tractRa), patchBoundary.raMin) - buff
@@ -162,10 +201,15 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
     axes.fill(tractRa, tractDec, fill=True, color="black", lw=1, linestyle='solid',
               edgecolor='k', alpha=0.2)
     for ip, patch in enumerate(tractInfo):
-        patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
+        if gen == 'gen2':
+            patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
+            patchWithData = patchIndexStr
+        else:  # gen3
+            patchIndexStr = str(patch.getIndex()) + ' ' + str(tractInfo.getSequentialPatchIndex(patch))
+            patchWithData = tractInfo.getSequentialPatchIndex(patch)
         color = "k"
         alpha = 0.05
-        if patchIndexStr in patchList:
+        if patchWithData in patchList:
             # color = ("c", "g", "r", "b", "m")[ip%5]
             color = 'g'
             alpha = 0.5
@@ -178,7 +222,7 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
         if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
                 centerDec > yMin - pBuff and centerDec < yMax + pBuff):
             axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
-            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
+            if patchWithData in patchList or (centerRa < xMin - 0.2*pBuff and
                                               centerRa > xMax + 0.2*pBuff and
                                               centerDec > yMin + 0.2*pBuff and
                                               centerDec < yMax - 0.2*pBuff):
@@ -190,21 +234,24 @@ def plotTractOutline(tractInfo, patchList, axes=None, fontSize=5, maxDegBeyondPa
     axes.set_ylim(ylim)
 
 
-def mosaicCoadd(butler, patch_list, band='g', tract=0, ref_patch=None, sampling=100, norm=None, nImage=False,
-                fig=None, show_colorbar=True, filename=None, flipX=True, flipY=False):
+def mosaicCoadd(repo, patch_list, band='g', tractIndex=0, refPatchIndex=None, sampling=100,
+                norm=None, nImage=False, fig=None, show_colorbar=True, filename=None, flipX=True,
+                flipY=False, gen='gen2', instrument=None, collections=None, skymapName=None):
     """Generate a mosaic image of many coadded patches.
 
     Parameters
     ----------
-    butler : `lsst.daf.base.Butler`
-        A Butler instance to retrieve data from a repository.
-    patch_list : `list` of `str`
-        A list of the patches containing images to mosaic.
+    repo : `str`
+        The path to the data repository.
+    patch_list : `list`
+        A list of the patch indices containing images to mosaic.
+        In gen2, list elements will be `str` e.g. '(1, 2)'
+        In gen3, list elements will be `float` (sequential patch indices)
     band : `str`, optional
         The band of the coadd to retrieve from the repository.
-    tract : `int`, optional
+    tractIndex : `int`, optional
         The tract of the skyMap.
-    ref_patch : `str`, optional
+    refPatchIndex : `str`, optional
         If set, use the given patch to set the image normalization for the figure.
     sampling : `int`, optional
         Stride factor to sample each input image in order to reduce the size in memory.
@@ -226,56 +273,141 @@ def mosaicCoadd(butler, patch_list, band='g', tract=0, ref_patch=None, sampling=
         Set to flip the individual patch images horizontally.
     flipY : `bool`, optional
         Set to flip the individual patch images vertically.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list` or `str`, optional
+        Must be provided for gen3 to load the camera properly
+    skymapName : `str`, optional
+        Must be provided for gen3 to load the skymap. e.g., 'hsc_rings_v1'
     """
+    # Decide what data product to plot (actual pixel data or nImages)
     coaddName = 'deepCoadd'
     if nImage:
         coaddName += '_nImage'
+
+    # Create a mapping between sequential patch indices and (x,y) patch indices
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+    else:  # gen3
+        if not collections:
+            raise ValueError('One or more collections is required in gen3.')
+        if not skymapName:
+            raise ValueError('A skymap is required in gen3.')
+        if not instrument:
+            raise ValueError('An instrument is required in gen3.')
+        butler = dafButler.Butler(repo, collections=collections)
+        skymap = butler.get('skyMap', skymap=skymapName, instrument=instrument, collections='skymaps')
+        tract = skymap.generateTract(tractIndex)
+        patchesToLoad = [patch for patch in tract if tract.getSequentialPatchIndex(patch) in patch_list]
+        patchIndicesToLoad = [patch.getIndex() for patch in patchesToLoad]  # (x,y) indices
+        indexmap = {}
+        for patch in tract:
+            indexmap[str(tract.getSequentialPatchIndex(patch))] = patch.getIndex()
+
+    # Use a reference patch to set the normalization for all the patches
     if norm is None:
-        if ref_patch in patch_list:
-            dataId = {'filter': band, 'tract': tract, 'patch': ref_patch}
-            coaddArray = (butler.get(coaddName, dataId=dataId)).getImage().getArray()
+        if gen == 'gen2':
+            if refPatchIndex in patch_list:
+                dataId = {'filter': band, 'tract': tractIndex, 'patch': refPatchIndex}
+                coaddArray = (butler.get(coaddName, dataId=dataId)).getImage().getArray()
+        else:  # gen3
+            if refPatchIndex in patchIndicesToLoad:
+                sequentialPatchIndex = [key for key, value in indexmap.items() if value == refPatchIndex][0]
+                dataId = {'band': band, 'tract': tractIndex, 'patch': int(sequentialPatchIndex),
+                          'instrument': instrument, 'skymap': skymapName}
+                if nImage:
+                    coaddArray = butler.get(coaddName, dataId=dataId).getArray()
+                else:
+                    coaddArray = butler.get(coaddName, dataId=dataId).getImage().getArray()
             norm = ImageNormalize(coaddArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+
+    # Set up the figure grid
     patch_x = []
     patch_y = []
-    for patch in patch_list:
-        m = patch.find(",")
-        patch_x.append(int(patch[:m]))
-        patch_y.append(int(patch[m+1:]))
-    x0 = min(patch_x) - 1
-    y0 = min(patch_y) - 1
+    if gen == 'gen2':
+        for patch in patch_list:
+            m = patch.find(",")
+            patch_x.append(int(patch[:m]))
+            patch_y.append(int(patch[m+1:]))
+        x0 = min(patch_x) - 1
+        y0 = min(patch_y) - 1
+    else:  # gen3
+        for patch in patchesToLoad:
+            patch_x.append(patch.getIndex()[0])
+            patch_y.append(patch.getIndex()[1])
+        x0 = min(patch_x)
+        y0 = min(patch_y)
     nx = max(patch_x) - x0 + 1
     ny = max(patch_y) - y0 + 1
-
     if fig is None:
         fig = plt.figure(figsize=(ny, nx))
     gs1 = gridspec.GridSpec(ny, nx)
-    gs1.update(wspace=0.0, hspace=0.0)  # set the spacing between axes.
-    for x in range(nx):
-        for y in range(ny):
-            i = x + nx*y
-            ax = plt.subplot(gs1[i])
-            patch = f"{x + x0},{ny - y + y0}"
-            if patch in patch_list:
-                dataId = {'filter': band, 'tract': tract, 'patch': patch}
-                coaddArray = (butler.get(coaddName, dataId=dataId)).getImage().getArray()
-                coaddArray = coaddArray[::sampling, ::sampling]
-                if flipX:
-                    coaddArray = np.flip(coaddArray, axis=0)
-                if flipY:
-                    coaddArray = np.flip(coaddArray, axis=1)
-                if norm is None:
-                    norm = ImageNormalize(coaddArray, interval=ZScaleInterval(), stretch=SqrtStretch())
-                im = ax.imshow(coaddArray, cmap='gray', norm=norm)
-            else:
-                ax.text(.3, .3, patch)
-            plt.setp(ax, xticks=[], yticks=[])
+    gs1.update(wspace=0.0, hspace=0.0)  # set the spacing between axes
 
+    # Plot coadd patches with data, and print the patch index if there's no data
+    if gen == 'gen2':
+        for x in range(nx):
+            for y in range(ny):
+                i = x + nx*y
+                ax = plt.subplot(gs1[i])
+                patch = f"{x + x0},{ny - y + y0}"
+                if patch in patch_list:
+                    dataId = {'filter': band, 'tract': tract, 'patch': patch}
+                    coaddArray = (butler.get(coaddName, dataId=dataId)).getImage().getArray()
+                    coaddArray = coaddArray[::sampling, ::sampling]
+                    if flipX:
+                        coaddArray = np.flip(coaddArray, axis=0)
+                    if flipY:
+                        coaddArray = np.flip(coaddArray, axis=1)
+                    if norm is None:
+                        norm = ImageNormalize(coaddArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+                    im = ax.imshow(coaddArray, cmap='gray', norm=norm)
+                else:
+                    ax.text(.3, .3, patch)
+                plt.setp(ax, xticks=[], yticks=[])
+    else:  # gen3
+        for x in range(nx):
+            for y in range(ny):
+                figIdx = x + nx*y
+                ax = plt.subplot(gs1[figIdx])
+                patchIndex = (x, ny - y - 1)
+                if patchIndex in patchIndicesToLoad:
+                    sequentialPatchIndex = [key for key, value in indexmap.items() if value == patchIndex][0]
+                    dataId = {'band': band, 'tract': tractIndex, 'patch': int(sequentialPatchIndex),
+                              'instrument': instrument, 'skymap': skymapName}
+                    try:
+                        coadd = butler.get(coaddName, dataId=dataId)
+                    except LookupError:
+                        print(f'Failed to retrieve data for patch {patchIndex}')
+                        ax.text(.3, .3, patchIndex)
+                        continue
+                    if nImage:
+                        coaddArray = coadd.getArray()
+                    else:
+                        coaddArray = coadd.getImage().getArray()
+                    coaddArray = coaddArray[::sampling, ::sampling]
+                    if flipX:
+                        coaddArray = np.flip(coaddArray, axis=0)
+                    if flipY:
+                        coaddArray = np.flip(coaddArray, axis=1)
+                    if norm is None:
+                        norm = ImageNormalize(coaddArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+                    im = ax.imshow(coaddArray, cmap='gray', norm=norm)
+                else:
+                    ax.text(.3, .3, patchIndex)
+                plt.setp(ax, xticks=[], yticks=[])
+
+    # Adjust and annotate plot
     plt.subplots_adjust(wspace=0)
     if show_colorbar:
         cbar_width = 0.01
         cbar_height = 0.5
         cbar_ax = fig.add_axes([0.9 - cbar_width, 0.5 - cbar_height/2, cbar_width, cbar_height])
         fig.colorbar(im, cax=cbar_ax)
+
+    # Save figure, if desired
     if filename:
         try:
             plt.savefig(filename, transparent=True)
