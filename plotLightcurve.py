@@ -1,151 +1,154 @@
 import os
-import sys
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib import cm
 import pandas as pd
-import sqlite3
-from astropy.visualization import (ZScaleInterval, SqrtStretch, ImageNormalize)
+import astropy.visualization as aviz
 
 import lsst.daf.persistence as dafPersist
-import lsst.afw.display as afwDisplay
 import lsst.geom
 import lsst.pex.exceptions
 
-"""Script to make light curve plots for DIAObjects using a Alert Production
-Database (APDB) resulting from a run of ap_pipe.
+import diaObjectAnalysis as doa
 
-Two plots are created: one for the light curve with a single set of
-processed/template/difference cutouts, and one showing all of the
-processed/difference cutouts.
+"""Utilities to make cutouts and light curves for DIA Sources
+and DIA Objects using an Alert Production Database (APDB).
 """
 
 
-def main():
-    afwDisplay.setDefaultBackend('matplotlib')
-    script = sys.argv[0]
-    try:
-        repo = sys.argv[1]
-        templateRepo = sys.argv[2]
-    except IndexError:
-        print('###')
-        print('Run this script with 2-3 arguments: repo (required), \
-               templateRepo (required), and dbName (optional)')
-        print('Please note that dbName path must be relative to repo')
-        print('For example, python {0} rerun/MyAmazingRerun rerun/TemplateLand association.db'.format(script))
-        print('###')
-    else:
-        repo = os.path.normpath(repo)
-        rerunName = os.path.basename(repo)
-        # TODO: UN-HARDWIRE THIS
-        miniRegion = 'and ra > 155.2 and ra < 155.3 and decl < -5.6 and decl > -5.8 \
-                      and nDiaSources > 5'  # and flags == 0'
-        try:
-            dbName = sys.argv[3]
-        except IndexError:
-            print('Using default dbName, association.db')
-            dbName = 'association.db'
-        finally:
-            print('Loading APDB Objects...')
-            objTable = loadApdbObjects(repo, dbName, filter=miniRegion)
-            objIdList = list(objTable['diaObjectId'])
-            print('Loaded {0} DIA Objects'.format(len(objIdList)))
-            # if len(objIdList) > 20:
-            #     objIdList = objIdList[0:20]
-            #     print('WARNING: objIdList has been truncated!')
-            print('Plotting light curves for {0} objects...'.format(len(objIdList)))
-            patchList = ['11,8', '11,9', '11,10']  # TODO: UN-HARDWIRE THIS
-            pdfLightcurves = PdfPages(rerunName + '_lcs.pdf')
-            pdfCutouts = PdfPages(rerunName + '_cos.pdf')
-            for obj in objIdList:
-                plotLightcurve(obj, objTable, repo, dbName, templateRepo,
-                               patchList, plotAllCutouts=True,
-                               pdfLc=pdfLightcurves, pdfCo=pdfCutouts)
-            pdfLightcurves.close()
-            pdfCutouts.close()
-
-
-def in_ipynb():
-    """Determine whether the code is being run in a notebook.
-    """
-    try:
-        cfg = get_ipython().config
-        if cfg['IPKernelApp']['parent_appname'] == 'ipython-notebook':
-            return True
-        elif 'LazyConfigValue' in str(cfg['IPKernelApp']['parent_appname']):
-            return True
-        else:
-            return False
-    except NameError:
-        return False
-
-
-def loadApdbObjects(repo, dbName='association.db', filter=''):
-    """Load select DIAObject columns from a APDB into a pandas dataframe.
+def loadSelectApdbSources(dbName, diaObjectId, dbType='sqlite', schema=None):
+    """Load select columns from DIASources for a single DIAObject
+    from an APDB into a pandas dataframe.
 
     Parameters
     ----------
-    repo : `str`
-        Path to an output repository from an ap_pipe run.
-    dbName : `str`, optional
-        Name of the APDB, which must reside in (or relative to) repo.
-    filter : `str`, optional
-        Criteria defining which objects to load from the APDB.
-        The default is no additional filter (i.e., loading all objects);
-        be careful - we will be plotting each object, so we want a number
-        we can actually work with!
-
-    Returns
-    -------
-    objTable : `pandas.DataFrame`
-        DIA Object Table.
-    """
-    connection = sqlite3.connect(os.path.join(repo, dbName))
-
-    # These are the tables available in the APDB
-    tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
-
-    # Only get objects with validityEnd NULL because that means they are still valid
-    objTable = pd.read_sql_query('select diaObjectId, ra, decl, nDiaSources, \
-                                  gPSFluxMean, validityEnd, flags from {0} \
-                                  where validityEnd is NULL \
-                                  {1};'.format(tables['obj'], filter), connection)
-    return objTable
-
-
-def loadApdbSources(dbPath, obj):
-    """Load select DIAObject columns from a APDB into a pandas dataframe.
-
-    Parameters
-    ----------
-    repo : `str`
-        Path to the APDB.
-    obj : `int`
+    dbName : `str`
+        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+    diaObjectId : `int`
         DIA Object for which we want to retrieve constituent DIA Sources.
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
 
     Returns
     -------
     srcTable : `pandas.DataFrame`
-        DIA Object Table containing only objects with validityEnd NULL.
-        Columns selected are presently hard-wired here.
+        DIA Source Table including the columns hard-wired below.
     """
-    connection = sqlite3.connect(dbPath)
+    connection, tables = doa.connectToApdb(dbName, dbType, schema)
 
-    # These are the tables available in the APDB
-    tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
-
-    # Load all information needed for light curves
-    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, \
-                                  ra, decl, ccdVisitId, \
-                                  midPointTai, apFlux, psFlux, apFluxErr, \
-                                  psFluxErr, totFlux, totFluxErr, flags from {0} \
-                                  where diaObjectId = {1};'.format(tables['src'], obj), connection)
+    # Load data from the source table
+    srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
+                                  "ra", "decl", "ccdVisitId", "filterName", \
+                                  "midPointTai", "apFlux", "psFlux", "apFluxErr", \
+                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
+                                  "ixxPSF", "iyyPSF", "ixyPSF", "flags" from {0}; \
+                                  where "diaObjectId" = {1};'.format(tables['src'], diaObjectId), connection)
     return srcTable
 
 
-def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.Extent2I(30, 30),
-                      templateDataType='deepCoadd', filter='g', templateVisit=None):
+def loadExposures(butler, dataId, collections):
+    """Load a science exposure, difference image, and warped template.
+
+    Parameters
+    ----------
+    butler : `lsst.daf.butler.Butler`
+        Butler in the repository corresponding to the output of an ap_pipe run.
+    dataId : `dict`-like
+        Gen3 data ID specifying at least instrument, visit, and detector.
+    collections : `str` or `list`
+        Gen3 collection or collections from which to load the exposures.
+
+    Returns
+    -------
+    science : `lsst.afw.Exposure`
+        calexp corresponding to dataId and collections.
+    difference : `lsst.afw.Exposure`
+        deepDiff_differenceExp corresponding to dataId and collections.
+    template : `lsst.afw.Exposure`
+        deepDiff_warpedExp corresponding to dataId and collections.
+    """
+    science = butler.get('calexp', dataId=dataId, collections=collections)
+    difference = butler.get('deepDiff_differenceExp', dataId=dataId, collections=collections)
+    template = butler.get('deepDiff_warpedExp', dataId=dataId, collections=collections)
+    return science, difference, template
+
+
+def retrieveCutouts(butler, dataId, collections, center, size=lsst.geom.Extent2I(30, 30)):
+    """Return small cutout exposures for a science exposure, difference image,
+    and warped template.
+
+    Parameters
+    ----------
+    butler : `lsst.daf.butler.Butler`
+        Butler in the repository corresponding to the output of an ap_pipe run.
+    dataId : `dict`-like
+        Gen3 data ID specifying at least instrument, visit, and detector.
+    collections : `str` or `list`
+        Gen3 collection or collections from which to load the exposures.
+    center : `lsst.geom.SpherePoint`
+        Desired center coordinate of cutout.
+    size : `lsst.geom.Extent`, optional
+        Desired size of cutout, default is 30x30 pixels
+
+    Returns
+    -------
+    scienceCutout : `lsst.afw.Exposure`
+        Cutout of calexp at location 'center' of size 'size'.
+    differenceCutout : `lsst.afw.Exposure`
+        Cutout of deepDiff_differenceExp at location 'center' of size 'size'.
+    templateCutout : `lsst.afw.Exposure`
+        Cutout of deepDiff_warpedExp at location 'center' of size 'size'.
+    """
+    science, difference, template = loadExposures(butler, dataId, collections)
+    scienceCutout = science.getCutout(center, size)
+    differenceCutout = difference.getCutout(center, size)
+    templateCutout = template.getCutout(center, size)
+    return scienceCutout, differenceCutout, templateCutout
+
+
+def plotCutout(scienceCutout, differenceCutout, templateCutout, output=None):
+    """Plot the cutouts for one DIASource in one image.
+
+    Parameters
+    ----------
+    scienceCutout : `lsst.afw.Exposure`
+        Cutout of calexp returned by retrieveCutouts.
+    differenceCutout : `lsst.afw.Exposure`
+        Cutout of deepDiff_differenceExp returned by retrieveCutouts.
+    templateCutout : `lsst.afw.Exposure`
+        Cutout of deepDiff_warpedExp returned by retrieveCutouts.
+    output : `str`, optional
+        If provided, save png to disk at output filepath.
+    """
+    def do_one(ax, data, name):
+        interval = aviz.ZScaleInterval()
+        if name == 'Difference':
+            norm = aviz.ImageNormalize(data, stretch=aviz.LinearStretch())
+        else:
+            norm = aviz.ImageNormalize(data, interval=interval, stretch=aviz.AsinhStretch(a=0.01))
+        ax.imshow(data, cmap=cm.bone, interpolation="none", norm=norm)
+        ax.axis('off')
+        ax.set_title(name)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    do_one(ax1, templateCutout.image.array, "Template")
+    do_one(ax2, scienceCutout.image.array, "Science")
+    do_one(ax3, differenceCutout.image.array, "Difference")
+    plt.tight_layout()
+
+    if output is not None:
+        plt.savefig(output, bbox_inches="tight")
+        plt.close()
+
+
+def getTemplateCutoutGen2(scienceImage, templateRepo, centerSource, size=lsst.geom.Extent2I(30, 30),
+                          templateDataType='deepCoadd', filter='g', templateVisit=None):
     """Retrieve cutout of difference imaging template.
+
+    This function is not maintained and is for use with gen2 middleware only.
 
     Parameters
     ----------
@@ -202,15 +205,17 @@ def getTemplateCutout(scienceImage, templateRepo, centerSource, size=lsst.geom.E
     return template
 
 
-def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
-                   useTotFlux=False, plotAllCutouts=False,
-                   cutoutIdx=0, labelCutouts=False,
-                   diffimType='deepDiff_differenceExp',
-                   pdfLc=None, pdfCo=None, diffimRepo=None,
-                   templateDataType='deepCoadd', templateVisitList=None,
-                   orderVisits=True):
+def plotLightcurveGen2(obj, objTable, repo, dbName, templateRepo,
+                       useTotFlux=False, plotAllCutouts=False,
+                       cutoutIdx=0, labelCutouts=False,
+                       diffimType='deepDiff_differenceExp',
+                       pdfLc=None, pdfCo=None, diffimRepo=None,
+                       templateDataType='deepCoadd', templateVisitList=None,
+                       orderVisits=True):
     """Plot lightcurve and processed, template, and difference image cutouts
     for one DIAObject. The lightcurve includes all associated DIASources.
+
+    This function is not maintained and is for use with gen2 middleware only.
 
     Nothing is returned, but a plot is saved to disk.
 
@@ -246,7 +251,7 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     """
     print('Loading APDB Sources...')
     dbPath = os.path.join(repo, dbName)
-    srcTable = loadApdbSources(dbPath, obj)
+    srcTable = loadSelectApdbSources(dbPath, obj)
     if orderVisits:
         srcTable = srcTable.sort_values("ccdVisitId")
     ra = objTable.loc[objTable['diaObjectId'] == obj, 'ra']
@@ -298,7 +303,9 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     except dafPersist.butlerExceptions.NoResults:
         calexpFirst = butler.get('instcal', dataIdDicts[cutoutIdx])
     calexpArray = calexpFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
-    calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+    calexpNorm = aviz.ImageNormalize(calexpArray,
+                                     interval=aviz.ZScaleInterval(),
+                                     stretch=aviz.SqrtStretch())
     plt.imshow(np.rot90(calexpArray), cmap='gray', norm=calexpNorm)
 
     # template image
@@ -308,20 +315,24 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     plt.title('Template', size=16)
     templateCutout = None
     if 'Coadd' in templateDataType or 'coadd' in templateDataType:
-        templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource)
+        templateCutout = getTemplateCutoutGen2(calexpFirst, templateRepo, centerSource)
         templateArray = templateCutout.getMaskedImage().getImage().getArray()
-        templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+        templateNorm = aviz.ImageNormalize(templateArray,
+                                           interval=aviz.ZScaleInterval(),
+                                           stretch=aviz.SqrtStretch())
         plt.imshow(np.fliplr(templateArray), cmap='gray', norm=templateNorm)
     else:  # it's a calexp or an instcal, probably
         for visit in templateVisitList:
             try:
-                templateCutout = getTemplateCutout(calexpFirst, templateRepo, centerSource,
-                                                   templateDataType=templateDataType,
-                                                   templateVisit=visit)
+                templateCutout = getTemplateCutoutGen2(calexpFirst, templateRepo, centerSource,
+                                                       templateDataType=templateDataType,
+                                                       templateVisit=visit)
             except dafPersist.butlerExceptions.NoResults:
                 continue  # loop through other possible visits
         templateArray = templateCutout.getMaskedImage().getImage().getArray()
-        templateNorm = ImageNormalize(templateArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+        templateNorm = aviz.ImageNormalize(templateArray,
+                                           interval=aviz.ZScaleInterval(),
+                                           stretch=aviz.SqrtStretch())
         plt.imshow(np.rot90(templateArray), cmap='gray', norm=templateNorm)
 
     # difference image
@@ -335,7 +346,9 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
     else:
         diffimFirst = butler.get(diffimType, dataIdDicts[cutoutIdx])
     diffimArray = diffimFirst.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
-    diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+    diffimNorm = aviz.ImageNormalize(diffimArray,
+                                     interval=aviz.ZScaleInterval(),
+                                     stretch=aviz.SqrtStretch())
     plt.imshow(np.rot90(diffimArray), cmap='gray', norm=diffimNorm)
 
     if plotAllCutouts:
@@ -348,14 +361,18 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
             except dafPersist.butlerExceptions.NoResults:
                 calexp = butler.get('instcal', dataId)
             calexpArray = calexp.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
-            calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+            calexpNorm = aviz.ImageNormalize(calexpArray,
+                                             interval=aviz.ZScaleInterval(),
+                                             stretch=aviz.SqrtStretch())
             if diffimRepo is not None:
                 butlerDiffim = dafPersist.Butler(diffimRepo)
                 diffim = butlerDiffim.get(diffimType, dataId)
             else:
                 diffim = butler.get(diffimType, dataId)
             diffimArray = diffim.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
-            diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
+            diffimNorm = aviz.ImageNormalize(diffimArray,
+                                             interval=aviz.ZScaleInterval(),
+                                             stretch=aviz.SqrtStretch())
             plt.subplot(12, 12, idx+1)
             plt.gca().get_xaxis().set_ticks([])
             plt.gca().get_yaxis().set_ticks([])
@@ -373,19 +390,11 @@ def plotLightcurve(obj, objTable, repo, dbName, templateRepo,
                 if idx == 0:
                     plt.text(1, 26, 'Diff', color='lime', size=8)
                 plt.text(2, 5, str(srcTable['midPointTai'][idx])[1:8], color='lime', size=8)
-        if pdfCo and not in_ipynb():
+        if pdfCo:  # may not work in notebook environment
             fig2.savefig(pdfCo, format='pdf')
-        elif not in_ipynb():
-            fig2.savefig(str(obj) + '_co.png')
         else:
             plt.show()
-    if pdfLc and not in_ipynb():
+    if pdfLc:  # may not work in notebook environment
         fig1.savefig(pdfLc, format='pdf')
-    elif not in_ipynb():
-        fig1.savefig(str(obj) + '_lc.png')
     else:
         plt.show()
-
-
-if __name__ == '__main__':
-    main()

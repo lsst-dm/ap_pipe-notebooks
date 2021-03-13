@@ -17,7 +17,7 @@ import lsst.afw.cameraGeom as cameraGeom
 from lsst.obs.decam import DarkEnergyCamera
 
 from diaObjectAnalysis import loadAllApdbObjects, loadAllApdbSources
-from plotLightcurve import getTemplateCutout
+from plotLightcurve import getTemplateCutoutGen2 as getTemplateCutout
 """
 Collection of plots that can be made using info in the APDB.
 
@@ -31,30 +31,40 @@ Future plots could include:
 """
 
 
-def addVisitCcdToSrcTable(sourceTable, cam='decam'):
+def addVisitCcdToSrcTable(sourceTable, instrument='DECam', gen='gen2', butler=None):
     """Add visit and ccd columns to sourceTable dataframe.
-    This currently works for DECam and HSC only.
 
     Parameters
     ----------
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
-    cam : `str`, one of either 'decam' or 'hsc', default is 'decam'
-        Needed to properly add the "ccd" and "visit" columns to the sourceTable.
+    instrument : `str`, optional
+        Defaults to 'DECam'; also supports gen2 'HSC' or any gen3 instrument.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'.
+    butler : `lsst.daf.butler.Butler` or None (gen2), optional
+        Butler in the repository corresponding to the output of an ap_pipe run.
 
     Returns
     -------
     sourceTable : `pandas.core.frame.DataFrame`
         The same as the input sourceTable, with new visit and ccd columns.
     """
-    if cam == 'decam':
+    if instrument == 'DECam' and gen == 'gen2':
         sourceTable['ccd'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[-2:])
         sourceTable['visit'] = sourceTable.ccdVisitId.apply(lambda x: str(x)[:-2])
-    elif cam == 'hsc':
+    elif instrument == 'HSC' and gen == 'gen2':
+        print('WARNING: your visit values may be suspect')
         sourceTable['visit'] = sourceTable.ccdVisitId.apply(lambda x: int(x/200.))
         sourceTable['ccd'] = sourceTable.ccdVisitId.apply(lambda x: int(np.round((x/200. - int(x/200.))*200)))
-    else:
-        raise ValueError('This plotting utility only works for DECam and HSC.')
+    elif gen == 'gen3':  # should work for all instruments
+        instrumentDataId = butler.registry.expandDataId(instrument=instrument)
+        packer = butler.registry.dimensions.makePacker("visit_detector", instrumentDataId)
+        dataId = packer.unpack(sourceTable.ccdVisitId)
+        sourceTable['visit'] = dataId['visit']
+        sourceTable['ccd'] = dataId['detector']
+    elif gen == 'gen2' and instrument not in ['DECam', 'HSC']:
+        raise ValueError('Keyword `instrument` is case sensitive. "DECam" and "HSC" work with gen2.')
     return sourceTable
 
 
@@ -120,7 +130,7 @@ def plotDiaSourcesPerVisit(repo, sourceTable, title='', gen='gen2', instrument='
         Either 'gen2' or 'gen3'
     instrument : `str`, optional
         Default is 'DECam', used with gen3 butler only
-    collections : `list`, optional
+    collections : `list` or `str`, optional
         Must be provided for gen3 to load the camera properly
     """
     ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable, gen, instrument, collections)
@@ -147,13 +157,14 @@ def plotDiaSourcesPerNight(sourceTable, title=''):
     ----------
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
+        NOT a view into or slice of a dataframe!
     title : `str`
         Title for the plot, optional.
     """
-    sourceTable['date_time'] = pd.to_datetime(sourceTable.midPointTai,
-                                              unit='D',
-                                              origin=pd.Timestamp('1858-11-17'))
-    sourceTable['date'] = sourceTable['date_time'].dt.date
+    date_times = pd.to_datetime(sourceTable['midPointTai'],
+                                unit='D',
+                                origin=pd.Timestamp('1858-11-17'))
+    sourceTable['date'] = date_times.dt.date
     night_count = sourceTable.groupby(['date', 'visit']).count()
     visits_per_night = night_count.groupby('date').count()
     pervisit_per_night = night_count.groupby('date').mean()
@@ -211,7 +222,7 @@ def getCcdCorners(butler, sourceTable, gen='gen2', instrument='DECam', collectio
         Either 'gen2' or 'gen3'
     instrument : `str`, optional
         Default is 'DECam', used with gen3 butler only
-    collections : `list`, optional
+    collections : `list` or `str`, optional
         Must be provided for gen3 to load the camera properly
 
     Returns
@@ -256,7 +267,8 @@ def getCcdCorners(butler, sourceTable, gen='gen2', instrument='DECam', collectio
     return corners
 
 
-def getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen2', instrument='DECam', collections=[]):
+def getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen2', instrument='DECam', collections=[],
+                            visit=None, detector=None):
     """Estimate the area of one CCD and one visit on the sky, in square degrees.
 
     Parameters
@@ -269,8 +281,12 @@ def getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen2', instrument='DECam', c
         Either 'gen2' or 'gen3'
     instrument : `str`, optional
         Default is 'DECam', used with gen3 butler only
-    collections : `list`, optional
+    collections : `list` or `str`, optional
         Must be provided for gen3 to load the camera properly
+    visit : `int` or None, optional
+        Specific visit to use when loading representative calexp.
+    detector : `int` or None, optional
+        Specific detector (ccd) to use when loading representative calexp.
 
     Returns
     -------
@@ -284,14 +300,22 @@ def getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen2', instrument='DECam', c
     nGoodCcds = len(ccds)
     if gen == 'gen2':
         butler = dafPersist.Butler(repo)
-        calexp = butler.get('calexp', visit=int(visits[0]), ccd=int(ccds[0]))
-        bbox = butler.get('calexp_bbox', visit=int(visits[0]), ccd=int(ccds[0]))
+        if visit is None:
+            visit = int(visits[0])
+        if detector is None:
+            ccd = int(ccds[0])
+        calexp = butler.get('calexp', visit=visit, ccd=ccd)
+        bbox = butler.get('calexp_bbox', visit=visit, ccd=ccd)
     else:  # gen3
         butler = dafButler.Butler(repo)
+        if visit is None:
+            visit = int(visits[0])
+        if detector is None:
+            detector = int(ccds[0])
         calexp = butler.get('calexp', collections=collections,
-                            instrument=instrument, visit=int(visits[0]), detector=int(ccds[0]))
+                            instrument=instrument, visit=visit, detector=detector)
         bbox = butler.get('calexp.bbox', collections=collections,
-                          instrument=instrument, visit=int(visits[0]), detector=int(ccds[0]))
+                          instrument=instrument, visit=visit, detector=detector)
     pixelScale = calexp.getWcs().getPixelScale().asArcseconds()
     ccdArea = (pixelScale*pixelScale*bbox.getArea()*u.arcsec**2).to(u.deg**2).value
     visitArea = ccdArea * nGoodCcds
@@ -316,7 +340,7 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
         Either 'gen2' or 'gen3'
     instrument : `str`, optional
         Default is 'DECam', used with gen3 butler only
-    collections : `list`, optional
+    collections : `list` or `str`, optional
         Must be provided for gen3 to load the camera properly
     """
     ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable, gen, instrument, collections)
@@ -367,7 +391,7 @@ def loadTables(repo, dbName='association.db', isVerify=False, dbType='sqlite',
                badFlagList=['base_PixelFlags_flag_bad',
                             'base_PixelFlags_flag_suspect',
                             'base_PixelFlags_flag_saturatedCenter'],
-               cam='decam'):
+               instrument='DECam', gen='gen2', schema=None):
     """Load DIA Object and DIA Source tables from an APDB.
 
     Parameters
@@ -380,10 +404,17 @@ def loadTables(repo, dbName='association.db', isVerify=False, dbType='sqlite',
         Is this an ap_verify run instead of an ap_pipe run?
         If True, the APDB is one level above repo on disk.
         If False, the APDB is in repo (default).
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
     badFlagList :  `list`
         Names of flags presumed to each indicate a DIA Source is garbage.
-    cam : `str`, one of either 'decam' or 'hsc', default is 'decam'
-        Needed to properly add the "ccd" and "visit" columns to the sourceTable.
+    instrument : `str`, one of either 'DECam' or 'HSC', default is 'DECam'
+        Needed to properly add the "ccd" and "visit" columns to the sourceTable,
+        and for all things gen3
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    schema : `str`, optional
+        Required if dbType is postgres
 
     Returns
     -------
@@ -406,18 +437,25 @@ def loadTables(repo, dbName='association.db', isVerify=False, dbType='sqlite',
     else:
         raise ValueError('database type not understood')
 
-    objTable = loadAllApdbObjects(dbPath, dbType=dbType)
-    srcTable = loadAllApdbSources(dbPath, dbType=dbType)
-    srcTable = addVisitCcdToSrcTable(srcTable, cam=cam)
+    if gen == 'gen3':
+        butler = dafButler.Butler(repo)
+    else:
+        butler = None
+
+    objTable = loadAllApdbObjects(dbPath, dbType=dbType, schema=schema)
+    srcTable = loadAllApdbSources(dbPath, dbType=dbType, schema=schema)
+    srcTable = addVisitCcdToSrcTable(srcTable, instrument=instrument, gen=gen, butler=butler)
     flagTable, srcTableFlags, flagFilter, \
-        goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList)
+        goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList,
+                                             gen=gen, instrument=instrument, repo=repo)
     return objTable, srcTable, goodObj, goodSrc
 
 
 def makeSrcTableFlags(sourceTable, objectTable,
                       badFlagList=['base_PixelFlags_flag_bad',
                                    'base_PixelFlags_flag_suspect',
-                                   'base_PixelFlags_flag_saturatedCenter']):
+                                   'base_PixelFlags_flag_saturatedCenter'],
+                      gen='gen2', instrument='DECam', repo=None):
     """Apply flag filters to a DIA Source and a DIA Object table.
 
     Parameters
@@ -428,6 +466,12 @@ def makeSrcTableFlags(sourceTable, objectTable,
         Pandas dataframe with DIA Objects from the same APDB.
     badFlagList :  `list`
         Names of flags presumed to each indicate a DIA Source is garbage.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    repo : `str`, optional
+        Repository in which to load a butler, used with gen3 only
 
     Returns
     -------
@@ -444,6 +488,11 @@ def makeSrcTableFlags(sourceTable, objectTable,
         Dataframe containing only DIA Objects from objectTable entirely composed
         of DIA Sources with no bad flags.
     """
+    if gen == 'gen3':
+        butler = dafButler.Butler(repo)
+    else:
+        butler = None
+    sourceTable = addVisitCcdToSrcTable(sourceTable, instrument=instrument, gen=gen, butler=butler)
     config = MapDiaSourceConfig()
     unpacker = UnpackApdbFlags(config.flagMap, 'DiaSource')
     flagValues = unpacker.unpack(sourceTable['flags'], 'flags')
@@ -509,6 +558,8 @@ def plotSourceLocationsOnObject(objId, objTable, sourceTable, repo, goodSrc=None
     """Plot a difference imaging template used for a DIA Object in a postage
     stamp cutout, along with the locations of the DIA Object and all
     constituent DIA Sources.
+
+    This is a deprecated gen2 function for the time being.
 
     Parameters
     ----------
@@ -576,7 +627,7 @@ def plotSourceLocationsOnObject(objId, objTable, sourceTable, repo, goodSrc=None
                 disp.dot('o', *coordSrc, ctype='C0', size=psfSize)  # blue
 
 
-def plotSeeingHistogram(repo, sourceTable, ccd=35):
+def plotSeeingHistogram(repo, sourceTable, ccd=35, gen='gen2', instrument='DECam', collections=[]):
     """Plot distribution of visit seeing.
 
     Parameters
@@ -587,20 +638,39 @@ def plotSeeingHistogram(repo, sourceTable, ccd=35):
         Pandas dataframe with DIA Sources from an APDB.
     ccd : `int`
         The ccd being considered, default 35.
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    instrument : `str`, optional
+        Default is 'DECam', used with gen3 butler only
+    collections : `list` or `str`, optional
+        Must be provided for gen3 to load the camera properly
     """
     fwhm = pd.DataFrame()
-    butler = dafPersist.Butler(repo)
     visits = np.unique(sourceTable['visit'])
     radii = []
-    for visit in visits:
-        miniCalexp = butler.get('calexp_sub', visit=int(visit),
+    if gen == 'gen2':
+        butler = dafPersist.Butler(repo)
+        for visit in visits:
+            calexp = butler.get('calexp_sub', visit=int(visit),
                                 ccd=ccd, bbox=lsst.geom.Box2I())
-        psf = miniCalexp.getPsf()
-        psfSize = psf.computeShape().getDeterminantRadius()
-        radii.append(psfSize*2.355)  # convert sigma to FWHM
+            psf = calexp.getPsf()
+            psfSize = psf.computeShape().getDeterminantRadius()
+            radii.append(psfSize*2.355)  # convert sigma to FWHM
+    else:  # gen3
+        butler = dafButler.Butler(repo)
+        for visit in visits:
+            psf = butler.get('calexp.psf', instrument=instrument,
+                             collections=collections,
+                             visit=int(visit), detector=ccd)
+            psfSize = psf.computeShape().getDeterminantRadius()
+            radii.append(psfSize*2.355)  # convert sigma to FWHM
+        # Get just one calexp for WCS purposes
+        calexp = butler.get('calexp', collections=collections,
+                            instrument=instrument,
+                            visit=int(visit), detector=ccd)
     fwhm['visit'] = pd.Series(visits)
     fwhm['radius'] = pd.Series(radii, index=fwhm.index)
-    pixelScale = miniCalexp.getWcs().getPixelScale().asArcseconds()  # same for all visits
+    pixelScale = calexp.getWcs().getPixelScale().asArcseconds()  # same for all visits
     fig, ax = plt.subplots(figsize=(6, 4))
     plt.hist(fwhm['radius'].values, alpha=0.5)
     plt.xlabel('Seeing FWHM (pixels)')
@@ -627,7 +697,7 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='',
         Either 'gen2' or 'gen3'
     instrument : `str`, optional
         Default is 'DECam', used with gen3 butler only
-    collections : `list`, optional
+    collections : `list` or `str`, optional
         Must be provided for gen3 to load the camera properly
     """
     if gen == 'gen2':
@@ -699,7 +769,178 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0'):
         ax.invert_xaxis()
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.subplots_adjust(wspace=0)
     if title:
         fig.suptitle(title)
+
+
+def plotFlagHist(sourceTable, title=None,
+                 badFlagList=['base_PixelFlags_flag_bad',
+                              'base_PixelFlags_flag_suspect',
+                              'base_PixelFlags_flag_saturatedCenter']):
+    """Plot a histogram of how often each pixel flag occurs in DIA Sources.
+
+    Parameters
+    ----------
+    sourceTable : `pandas.core.frame.DataFrame`
+        Pandas dataframe with DIA Sources from an APDB.
+    title : `str`
+        String for overall figure title, optional.
+    badFlagList : `list`, optional
+        Flag names to plot in red, presumed to indicate a DIA Source is garbage.
+    """
+    config = MapDiaSourceConfig()
+    unpacker = UnpackApdbFlags(config.flagMap, 'DiaSource')
+    flagValues = unpacker.unpack(sourceTable['flags'], 'flags')
+    labels = list(flagValues.dtype.names)
+    flagTable = pd.DataFrame(flagValues, index=sourceTable.index)
+    flagSum = flagTable.sum()
+    flagsToPlot = [count for count in flagSum.values]
+    assert len(flagsToPlot) == len(labels)
+
+    flagColors = []
+    for label in labels:
+        if label in badFlagList:
+            flagColors.append('C3')
+        else:
+            flagColors.append('C0')
+
+    fig, ax = plt.subplots(figsize=(9, 9))
+    ax.barh(labels, flagsToPlot, color=flagColors)
+    fig.subplots_adjust(left=0.35)
+    ax.set_xlabel('Number of flagged DIASources')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.title(title)
+
+
+def plotFluxHistSrc(srcTable1, srcTable2=None, fluxType='psFlux',
+                    label1=None, label2=None, title=None, ylog=False,
+                    color1='#2979C1', color2='#Bee7F5',
+                    binmin=-3e3, binmax=3e3, nbins=200):
+    """Plot distribution of fluxes from 1-2 DIASource tables.
+
+    Parameters
+    ----------
+    srcTable1 : `pandas.core.frame.DataFrame`
+        Pandas dataframe with DIA Sources from an APDB.
+    srcTable2 : `pandas.core.frame.DataFrame`, optional
+        Second pandas dataframe with DIA Sources from an APDB.
+    fluxType : `str`, optional
+        Choose from psFlux (default), totFlux, or apFlux.
+    label1 : `str`, optional
+        Label for srcTable1.
+    label2 : `str`, optional
+        Label for srcTable2.
+    title : `str`, optional
+        Plot title.
+    ylog : `bool`, optional
+        Plot the y-axis on a log scale? Default False
+    color1 : `str`, optional
+        Color for srcTable1.
+    color2 : `str`, optional
+        Color for srcTable2.
+    binmin : `float`, optional
+        Minimum x-value for bins.
+    binmax : `float`, optional
+        Maximum x-value for bins.
+    nbins : `int`, optional
+        Number of histogram bins.
+
+    """
+    plt.figure()
+    plt.xlabel(fluxType, size=12)
+    plt.ylabel('DIA Source count', size=12)
+    bins = np.linspace(binmin, binmax, nbins)
+    if ylog:
+        plt.yscale('log')
+    plt.hist(srcTable1[fluxType].values, bins=bins, color=color1, label=label1)
+    if srcTable2 is not None:
+        plt.hist(srcTable2[fluxType].values, bins=bins, color=color2, label=label2)
+    if label1:
+        plt.legend(frameon=False, fontsize=12)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.title(title)
+
+
+def source_magnitude_histogram(repo, sourceTable, bandToPlot, instrument,
+                               collections, detectorToUse=42, binsize=0.2,
+                               min_magnitude=None, max_magnitude=None,
+                               badFlagList=['base_PixelFlags_flag_bad',
+                                            'base_PixelFlags_flag_suspect',
+                                            'base_PixelFlags_flag_saturatedCenter']):
+    """Plot magnitudes of sources from the source catalog for DIA Sources.
+
+    This is a gen3-only function!
+
+    Note that the values plotted are from the 'src' (catalog corresponding to
+    the processed visit image), not the APDB or difference image source catalog.
+
+    Parameters
+    ----------
+    repo : `str`
+        Gen3 repository containing 'collections'
+    sourceTable : `pandas.core.frame.DataFrame`
+        Pandas dataframe with DIA Sources from an APDB.
+    bandToPlot : `str`
+        Typically one of 'g', 'r', 'i', 'z', or 'y'
+    instrument : `str`
+        e.g., 'HSC' or 'DECam'
+    collections : `str`
+        Collection within gen3 'repo' to use
+    detectorToUse : `int`, optional
+        Detector to use for all the plots, default 42
+    binsize : `float`, optional
+        Histogram bin size, default 0.2
+    min_magnitude : `float` or None, optional
+        Set plot x-axis minimum
+    max_magnitude : `float` or None, optional
+        Set plot x-axis maximum
+    badFlagList : `list`, optional
+        Exclude sources with flags in this list.
+    """
+
+    visits = np.unique(sourceTable['visit'])
+    area, _ = getCcdAndVisitSizeOnSky(repo, sourceTable, gen='gen3', detector=detectorToUse,
+                                      instrument=instrument, collections=collections)
+    butler = dafButler.Butler(repo)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for visit in visits:
+        band = sourceTable.loc[sourceTable['visit'] == visit, 'filterName'].values[0]
+        if band != bandToPlot:
+            continue
+        if band == 'g':
+            color = 'C2'
+        elif band == 'r':
+            color = 'C1'
+        elif band == 'i':
+            color = 'C3'
+        elif band == 'z':
+            color = 'C5'
+        else:
+            color = 'k'  # should be y
+        src = butler.get("src", dataId={"visit": visit, "detector": detectorToUse},
+                         collections=collections, instrument=instrument)
+        flag_src = [False]*len(src)
+        f_nJy = src['base_PsfFlux_instFlux']
+        for flag in badFlagList:
+            flag_src |= src[flag]
+
+        good_fluxes = np.array([s for s, f in zip(f_nJy, flag_src) if ~f and s > 0])
+        mags = (good_fluxes*u.nJy).to_value(u.ABmag)
+
+        if min_magnitude is None:
+            min_magnitude = np.floor(np.min(mags)/binsize)*binsize
+        if max_magnitude is None:
+            max_magnitude = np.ceil(np.max(mags)/binsize)*binsize
+        nbins = int((max_magnitude - min_magnitude)/binsize)
+        hist, bin_edges = np.histogram(mags, bins=nbins, range=(min_magnitude, max_magnitude))
+        bin_centers = [(bin_edges[i] + bin_edges[i + 1])/2 for i in range(len(bin_edges) - 1)]
+        plt.plot(bin_centers, hist/area/binsize, label=visit, color=color)
+    plt.title(f'{bandToPlot} Source Counts')
+    plt.xlabel('Magnitude')
+    plt.ylabel('Detected sources per mag per deg^2')
+    ax.set_yscale('log')
