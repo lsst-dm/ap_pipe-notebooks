@@ -739,7 +739,7 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='',
     ax1.invert_xaxis()
 
 
-def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0'):
+def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0', size=0.1):
     """Make a multi-panel plot of DIA Sources for each visit on the sky.
 
     Parameters
@@ -752,6 +752,8 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0'):
         String for overall figure title, optional.
     color : `str`
         Color to use for the scatter plot, optional (default is C0 blue).
+    size : `float`
+        Size for points with marker style '.'.
     """
     visits = np.unique(sourceTable['visit'])
     nVisits = len(visits)
@@ -764,7 +766,7 @@ def plotDiaSourcesOnSkyGrid(repo, sourceTable, title=None, color='C0'):
         idx = sourceTable.visit == visit
         ax = fig.add_subplot(squareGridSize, squareGridSize, count + 1, aspect='equal')
         ax.scatter(sourceTable.ra[idx], sourceTable.decl[idx], c=color,
-                   marker='.', s=0.1, alpha=0.2)
+                   marker='.', s=size, alpha=0.2)
         ax.set_title(visit, size=8)
         ax.invert_xaxis()
         ax.get_xaxis().set_visible(False)
