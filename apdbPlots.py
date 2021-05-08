@@ -12,7 +12,7 @@ import lsst.daf.persistence as dafPersist
 import lsst.daf.butler as dafButler
 import lsst.afw.display as afwDisplay
 import lsst.geom
-from lsst.ap.association import MapDiaSourceConfig, UnpackApdbFlags
+from lsst.ap.association import UnpackApdbFlags, TransformDiaSourceCatalogConfig
 import lsst.afw.cameraGeom as cameraGeom
 from lsst.obs.decam import DarkEnergyCamera
 
@@ -493,7 +493,7 @@ def makeSrcTableFlags(sourceTable, objectTable,
     else:
         butler = None
     sourceTable = addVisitCcdToSrcTable(sourceTable, instrument=instrument, gen=gen, butler=butler)
-    config = MapDiaSourceConfig()
+    config = TransformDiaSourceCatalogConfig()
     unpacker = UnpackApdbFlags(config.flagMap, 'DiaSource')
     flagValues = unpacker.unpack(sourceTable['flags'], 'flags')
     flagTable = pd.DataFrame(flagValues, index=sourceTable.index)
@@ -792,7 +792,7 @@ def plotFlagHist(sourceTable, title=None,
     badFlagList : `list`, optional
         Flag names to plot in red, presumed to indicate a DIA Source is garbage.
     """
-    config = MapDiaSourceConfig()
+    config = TransformDiaSourceCatalogConfig()
     unpacker = UnpackApdbFlags(config.flagMap, 'DiaSource')
     flagValues = unpacker.unpack(sourceTable['flags'], 'flags')
     labels = list(flagValues.dtype.names)
