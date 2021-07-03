@@ -49,7 +49,7 @@ def loadSelectApdbSources(dbName, diaObjectId, dbType='sqlite', schema=None):
     return srcTable
 
 
-def loadExposures(butler, dataId, collections):
+def loadExposures(butler, dataId, collections, diffName='deep'):
     """Load a science exposure, difference image, and warped template.
 
     Parameters
@@ -60,23 +60,25 @@ def loadExposures(butler, dataId, collections):
         Gen3 data ID specifying at least instrument, visit, and detector.
     collections : `str` or `list`
         Gen3 collection or collections from which to load the exposures.
+    diffName : `str`, optional
+        Default is 'deep', but 'goodSeeing' may be needed instead.
 
     Returns
     -------
     science : `lsst.afw.Exposure`
         calexp corresponding to dataId and collections.
     difference : `lsst.afw.Exposure`
-        deepDiff_differenceExp corresponding to dataId and collections.
+        differenceExp corresponding to dataId and collections.
     template : `lsst.afw.Exposure`
-        deepDiff_warpedExp corresponding to dataId and collections.
+        warpedExp corresponding to dataId and collections.
     """
     science = butler.get('calexp', dataId=dataId, collections=collections)
-    difference = butler.get('deepDiff_differenceExp', dataId=dataId, collections=collections)
-    template = butler.get('deepDiff_warpedExp', dataId=dataId, collections=collections)
+    difference = butler.get(diffName + 'Diff_differenceExp', dataId=dataId, collections=collections)
+    template = butler.get(diffName + 'Diff_warpedExp', dataId=dataId, collections=collections)
     return science, difference, template
 
 
-def retrieveCutouts(butler, dataId, collections, center, size=lsst.geom.Extent2I(30, 30)):
+def retrieveCutouts(butler, dataId, collections, center, size=lsst.geom.Extent2I(30, 30), diffName='deep'):
     """Return small cutout exposures for a science exposure, difference image,
     and warped template.
 
@@ -92,6 +94,8 @@ def retrieveCutouts(butler, dataId, collections, center, size=lsst.geom.Extent2I
         Desired center coordinate of cutout.
     size : `lsst.geom.Extent`, optional
         Desired size of cutout, default is 30x30 pixels
+    diffName : `str`, optional
+        Default is 'deep', but 'goodSeeing' may be needed instead.
 
     Returns
     -------
@@ -102,7 +106,7 @@ def retrieveCutouts(butler, dataId, collections, center, size=lsst.geom.Extent2I
     templateCutout : `lsst.afw.Exposure`
         Cutout of deepDiff_warpedExp at location 'center' of size 'size'.
     """
-    science, difference, template = loadExposures(butler, dataId, collections)
+    science, difference, template = loadExposures(butler, dataId, collections, diffName)
     scienceCutout = science.getCutout(center, size)
     differenceCutout = difference.getCutout(center, size)
     templateCutout = template.getCutout(center, size)
