@@ -344,8 +344,6 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
         Must be provided for gen3 to load the camera properly
     """
     ccdArea, visitArea = getCcdAndVisitSizeOnSky(repo, sourceTable, gen, instrument, collections)
-    ccds = np.unique(sourceTable['ccd'])
-    ccdMax = int(np.max(ccds))
     nVisits = len(np.unique(sourceTable['visit'].values))
     ccdGroup = sourceTable.groupby('ccd')
     ccdSourceCount = ccdGroup.visit.count().values/nVisits/ccdArea
@@ -362,10 +360,7 @@ def plotDiaSourceDensityInFocalPlane(repo, sourceTable, cmap=mpl.cm.Blues, title
 
     for index, row in corners.iterrows():
         try:
-            if ccdMax < 100:  # it's DECam
-                averageFocalPlane = ccdGroup.get_group('%02d' % row[1]).x.count()/nVisits/ccdArea
-            else:  # it's HSC
-                averageFocalPlane = ccdGroup.get_group(int(row[1])).x.count()/nVisits/ccdArea
+            averageFocalPlane = ccdGroup.get_group(int(row[1])).x.count()/nVisits/ccdArea
         except KeyError:
             averageFocalPlane = 0  # plot normalization will be weird but it won't fall over
         ax1.add_patch(patches.Rectangle((row[7], row[6]),
@@ -716,8 +711,8 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='',
         xFP, yFP = ccd2focalPlane(row['x'], row['y'], row['ccd'], camera=camera)
         xFP_list.append(xFP)
         yFP_list.append(yFP)
-    sourceTable['xFP'] = pd.Series(xFP_list, index=sourceTable.index)
-    sourceTable['yFP'] = pd.Series(yFP_list, index=sourceTable.index)
+    xFP_Series = pd.Series(xFP_list, index=sourceTable.index)
+    yFP_Series = pd.Series(yFP_list, index=sourceTable.index)
 
     fig1 = plt.figure(figsize=(8, 8))
     ax1 = fig1.add_subplot(111, aspect='equal')
@@ -730,7 +725,8 @@ def plotDiaSourcesInFocalPlane(repo, sourceTable, gridsize=(400, 400), title='',
         ax1.text(row[7] - row.height/2, row[6] - row.width/2, '%d' % (row[1]))
         plt.plot(row[7] - row.height/2, row[6] - row.width/2, ',')
 
-    ax1.hexbin(sourceTable['yFP'], sourceTable['xFP'], gridsize=gridsize, bins='log', cmap='Blues')
+    # somehow x and y are switched... geometry is hard
+    ax1.hexbin(yFP_Series, xFP_Series, gridsize=gridsize, bins='log', cmap='Blues')
     ax1.set_title('DIA Sources in focal plane coordinates %s' % (title))
 
     ax1.set_xlabel('Focal Plane X', size=16)
