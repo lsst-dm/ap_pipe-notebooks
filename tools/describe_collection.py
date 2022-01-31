@@ -1,4 +1,4 @@
-#! /home/nsedaghat/.conda/envs/nimas/bin/python3
+#! /usr/bin/env python
 
 from reg_tools import list_datasets
 import lsst.daf.butler as dafButler
