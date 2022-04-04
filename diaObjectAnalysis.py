@@ -91,7 +91,7 @@ def connectToApdb(dbName, dbType='sqlite', schema=None):
 
 
 def loadAllApdbObjects(dbName, dbType='sqlite', schema=None):
-    """Load select DIAObject columns from a APDB into a pandas dataframe.
+    """Load a subset of DIAObject columns from a APDB into a pandas dataframe.
 
     Parameters
     ----------
@@ -118,9 +118,8 @@ def loadAllApdbObjects(dbName, dbType='sqlite', schema=None):
                                   where "validityEnd" is NULL;'.format(tables['obj']), connection)
     return objTable
 
-
 def loadAllApdbSources(dbName, dbType='sqlite', schema=None):
-    """Load select columns from all DIASources from a APDB into a pandas dataframe.
+    """Load a subset of columns from all DIASources from a APDB into a pandas dataframe.
 
     Parameters
     ----------
@@ -147,6 +146,70 @@ def loadAllApdbSources(dbName, dbType='sqlite', schema=None):
                                   "ixxPSF", "iyyPSF", "ixyPSF", "flags", "filterName" from {0}; \
                                   '.format(tables['src']), connection)
     return srcTable
+
+def loadApdbSourcesByVisit(dbName, visit, dbType='sqlite', schema=None):
+    """Load a subset of columns from all DIASources from a APDB into a pandas dataframe.
+
+    Parameters
+    ----------
+    dbName : `str`
+        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
+    visit : `int`
+        Visit number for loading objects
+
+    Returns
+    -------
+    srcTable : `pandas.DataFrame`
+        DIA Source Table including the columns hard-wired below.
+    """
+    connection, tables = connectToApdb(dbName, dbType, schema)
+    # Load data from the source table
+    srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
+                                  "ra", "decl", "ccdVisitId", \
+                                  "midPointTai", "apFlux", "psFlux", "apFluxErr", \
+                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
+                                  "ixxPSF", "iyyPSF", "ixyPSF", "flags", "filterName" from {0} \
+                                   where CAST("ccdVisitId" as text) like {1} ; \
+                                  '.format(tables['src'], "'"+str(int(visit))+"%'"), connection)
+    return srcTable
+
+def loadApdbSourcesByBand(dbName, band, dbType='sqlite', schema=None):
+    """Load a subset of columns from all DIASources from a APDB into a pandas dataframe.
+
+    Parameters
+    ----------
+    dbName : `str`
+        If dbType is sqlite, full filepath to the APDB on lsst-dev.
+        If dbType is postgres, name of the APDB on lsst-pg-devel1.
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    schema : `str`, optional
+        Required if dbType is postgres
+    band : `str`
+        Band for loading objects (matched against filterName)
+
+    Returns
+    -------
+    srcTable : `pandas.DataFrame`
+        DIA Source Table including the columns hard-wired below.
+    """
+    connection, tables = connectToApdb(dbName, dbType, schema)
+    # Load data from the source table
+    srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
+                                  "ra", "decl", "ccdVisitId", \
+                                  "midPointTai", "apFlux", "psFlux", "apFluxErr", \
+                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
+                                  "ixxPSF", "iyyPSF", "ixyPSF", "flags", "filterName" from {0} \
+                                   where "filterName" = {1} ; \
+                                  '.format(tables['src'], "'"+band+"'"), connection)
+    return srcTable
+
+
 
 
 def setObjectFilter(objTable):
