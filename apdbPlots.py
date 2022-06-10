@@ -16,7 +16,7 @@ from lsst.ap.association import UnpackApdbFlags, TransformDiaSourceCatalogConfig
 import lsst.afw.cameraGeom as cameraGeom
 from lsst.obs.decam import DarkEnergyCamera
 
-from diaObjectAnalysis import loadAllApdbObjects, loadAllApdbSources
+from diaObjectAnalysis import loadAllApdbObjects, loadAllApdbSources, loadApdbSourcesByVisit, loadApdbSourcesByBand
 from plotLightcurve import getTemplateCutoutGen2 as getTemplateCutout
 """
 Collection of plots that can be made using info in the APDB.
@@ -121,7 +121,7 @@ def plotDiaSourcesPerVisit(repo, sourceTable, title='', gen='gen2', instrument='
     Parameters
     ----------
     repo : `str`
-        Repository corresponding to the output of an ap_pipe run.
+        Butler repository corresponding to the output of an ap_pipe run.
     sourceTable : `pandas.core.frame.DataFrame`
         Pandas dataframe with DIA Sources from an APDB.
     title : `str`
@@ -439,6 +439,136 @@ def loadTables(repo, dbName='association.db', isVerify=False, dbType='sqlite',
 
     objTable = loadAllApdbObjects(dbPath, dbType=dbType, schema=schema)
     srcTable = loadAllApdbSources(dbPath, dbType=dbType, schema=schema)
+    srcTable = addVisitCcdToSrcTable(srcTable, instrument=instrument, gen=gen, butler=butler)
+    flagTable, srcTableFlags, flagFilter, \
+        goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList,
+                                             gen=gen, instrument=instrument, repo=repo)
+    return objTable, srcTable, goodObj, goodSrc
+
+def loadTablesByVisit(repo, visit, dbName='association.db', isVerify=False, dbType='sqlite',
+               badFlagList=['base_PixelFlags_flag_bad',
+                            'base_PixelFlags_flag_suspect',
+                            'base_PixelFlags_flag_saturatedCenter'],
+               instrument='DECam', gen='gen2', schema=None):
+    """Load DIA Object and DIA Source tables from an APDB.
+
+    Parameters
+    ----------
+    repo : `str`
+        Repository corresponding to the output of an ap_pipe run.
+    visit: `int`
+        Visit number
+    dbName : `str`
+        Name of APDB.
+    isVerify : `bool`
+        Is this an ap_verify run instead of an ap_pipe run?
+        If True, the APDB is one level above repo on disk.
+        If False, the APDB is in repo (default).
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    badFlagList :  `list`
+        Names of flags presumed to each indicate a DIA Source is garbage.
+    instrument : `str`, one of either 'DECam' or 'HSC', default is 'DECam'
+        Needed to properly add the "ccd" and "visit" columns to the sourceTable,
+        and for all things gen3
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    schema : `str`, optional
+        Required if dbType is postgres
+
+    Returns
+    -------
+    objTable : `pandas.core.frame.DataFrame`
+        DIA Object table loaded from the APDB.
+    srcTable : `pandas.core.frame.DataFrame`
+        DIA Source table loaded from the APDB.
+    goodObj : `pandas.core.frame.DataFrame`
+        A subset of objTable containing only DIA Objects composed entirely of good DIA Sources.
+    goodSrc : `pandas.core.frame.DataFrame`
+        A subset of srcTable containing only good DIA Sources.
+    """
+    if dbType == 'sqlite' and not isVerify:  # APDB is in repo (default)
+        dbPath = os.path.abspath(os.path.join(repo, dbName))
+    elif dbType == 'sqlite' and isVerify:  # APDB is one level above repo (ap_verify sqlite case)
+        repoUpOne = os.path.dirname(repo)
+        dbPath = os.path.abspath(os.path.join(repoUpOne, dbName))
+    elif dbType == 'postgres':
+        dbPath = dbName
+    else:
+        raise ValueError('database type not understood')
+
+    if gen == 'gen3':
+        butler = dafButler.Butler(repo)
+    else:
+        butler = None
+
+    objTable = loadAllApdbObjects(dbPath, dbType=dbType, schema=schema)
+    srcTable = loadApdbSourcesByVisit(dbPath, visit, dbType=dbType, schema=schema)
+    srcTable = addVisitCcdToSrcTable(srcTable, instrument=instrument, gen=gen, butler=butler)
+    flagTable, srcTableFlags, flagFilter, \
+        goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList,
+                                             gen=gen, instrument=instrument, repo=repo)
+    return objTable, srcTable, goodObj, goodSrc
+
+def loadTablesByBand(repo, band, dbName='association.db', isVerify=False, dbType='sqlite',
+               badFlagList=['base_PixelFlags_flag_bad',
+                            'base_PixelFlags_flag_suspect',
+                            'base_PixelFlags_flag_saturatedCenter'],
+               instrument='DECam', gen='gen2', schema=None):
+    """Load DIA Object and DIA Source tables from an APDB.
+
+    Parameters
+    ----------
+    repo : `str`
+        Repository corresponding to the output of an ap_pipe run.
+    band: `str`
+        Band to match against filterName in DB
+    dbName : `str`
+        Name of APDB.
+    isVerify : `bool`
+        Is this an ap_verify run instead of an ap_pipe run?
+        If True, the APDB is one level above repo on disk.
+        If False, the APDB is in repo (default).
+    dbType : `str`, optional
+        Either 'sqlite' or 'postgres'
+    badFlagList :  `list`
+        Names of flags presumed to each indicate a DIA Source is garbage.
+    instrument : `str`, one of either 'DECam' or 'HSC', default is 'DECam'
+        Needed to properly add the "ccd" and "visit" columns to the sourceTable,
+        and for all things gen3
+    gen : `str`, optional
+        Either 'gen2' or 'gen3'
+    schema : `str`, optional
+        Required if dbType is postgres
+
+    Returns
+    -------
+    objTable : `pandas.core.frame.DataFrame`
+        DIA Object table loaded from the APDB.
+    srcTable : `pandas.core.frame.DataFrame`
+        DIA Source table loaded from the APDB.
+    goodObj : `pandas.core.frame.DataFrame`
+        A subset of objTable containing only DIA Objects composed entirely of good DIA Sources.
+    goodSrc : `pandas.core.frame.DataFrame`
+        A subset of srcTable containing only good DIA Sources.
+    """
+    if dbType == 'sqlite' and not isVerify:  # APDB is in repo (default)
+        dbPath = os.path.abspath(os.path.join(repo, dbName))
+    elif dbType == 'sqlite' and isVerify:  # APDB is one level above repo (ap_verify sqlite case)
+        repoUpOne = os.path.dirname(repo)
+        dbPath = os.path.abspath(os.path.join(repoUpOne, dbName))
+    elif dbType == 'postgres':
+        dbPath = dbName
+    else:
+        raise ValueError('database type not understood')
+
+    if gen == 'gen3':
+        butler = dafButler.Butler(repo)
+    else:
+        butler = None
+
+    objTable = loadAllApdbObjects(dbPath, dbType=dbType, schema=schema)
+    srcTable = loadApdbSourcesByBand(dbPath, band, dbType=dbType, schema=schema)
     srcTable = addVisitCcdToSrcTable(srcTable, instrument=instrument, gen=gen, butler=butler)
     flagTable, srcTableFlags, flagFilter, \
         goodSrc, goodObj = makeSrcTableFlags(srcTable, objTable, badFlagList=badFlagList,
