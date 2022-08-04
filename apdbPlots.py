@@ -669,8 +669,14 @@ def plotHitsSourcesOnSky(sourceTable, title=''):
     ax1.spines['left'].set_visible(False)
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
-    ax1.invert_xaxis()
-    ax2.invert_xaxis()
+
+    ax1.set_xlim(151.2, 148.9)
+    #ax1.set_ylim(1.2, 3.3)
+    ax2.set_xlim(156.6, 153.9)
+    ax2.set_ylim(-7.6, -3.9)
+
+    #ax1.invert_xaxis()
+    #ax2.invert_xaxis()
 
     ax1.yaxis.tick_right()
     ax1.yaxis.set_label_position('right')

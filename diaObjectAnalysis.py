@@ -142,7 +142,7 @@ def loadAllApdbSources(dbName, dbType='sqlite', schema=None):
     srcTable = pd.read_sql_query('select "diaSourceId", "diaObjectId", \
                                   "ra", "decl", "ccdVisitId", \
                                   "midPointTai", "apFlux", "psFlux", "apFluxErr", \
-                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", \
+                                  "psFluxErr", "totFlux", "totFluxErr", "x", "y", "snr", \
                                   "ixxPSF", "iyyPSF", "ixyPSF", "flags", "filterName" from {0}; \
                                   '.format(tables['src']), connection)
     return srcTable
