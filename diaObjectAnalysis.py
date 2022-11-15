@@ -75,10 +75,13 @@ def connectToApdb(dbName, dbType='sqlite', schema=None):
     elif dbType == 'postgres':
         if schema is None:
             raise RuntimeError('Schema must be set for postgres APDB')
-        host = 'lsst-pg-devel1.ncsa.illinois.edu'
+        host = 'usdf-prompt-processing-dev.slac.stanford.edu'
+        user = 'rubin'
         connection = psycopg2.connect(dbname=dbName,
                                       host=host,
-                                      options=f'-c search_path={schema}')
+                                      user=user,)
+        cursor = connection.cursor()
+        cursor.execute("SET search_path TO " + schema)
     else:
         raise ValueError('dbType must be sqlite or postgres')
 
