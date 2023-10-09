@@ -105,3 +105,4 @@ venv.bak/
 
 # html versions of Jupyter Notebooks
 .html
+.*~
