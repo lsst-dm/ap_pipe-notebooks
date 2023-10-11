@@ -89,43 +89,71 @@ ids = list(butler.registry.queryDataIds(['visit','detector'],
                                         #where="instrument='LSSTCam-imSim' AND skymap='DC2' AND exposure<1100000"
                                         ))
 
+## print the data ids in a readable format
+for dataId in ids[:100]:
+    print(dataId.to_simple())
 
+## Loop on data ids and extract the truth and detection catalogs
 all_src = pd.DataFrame()
 all_truth = pd.DataFrame()
-for i in range(min(20, len(ids))):
+for i in range(min(100, len(ids))):
     src_table, truth = run_single(i)
     all_src = pd.concat([all_src, src_table])
     all_truth = pd.concat([all_truth, truth])
 
 # The "label" column is True for all sources that are matched to a truth object.
 # Let's look at some stats.
-print(f"Found {len(all_src[all_src['label']])} matches out of {len(all_src)} sources")
+print("Total number of detected sources: ", len(all_src))
+print("Number of sources matching the truth: ", np.sum(all_src['label']))
+print("Number of sources not matching the truth (false positives): ", np.sum(1-all_src['label']))
+print("Total number of truth objects: ", len(all_truth))
+print("Number of truth objects not matched to a source (misses): ", len(all_truth) - np.sum(all_src['label']))
 
-## Now sweep over the SNR threshold and create a ROC curve
+## Some statistics about detections
+# plot the hist of mag_r of all true objects
+# you need to drop the NaNs and infinities first.
+all_truth['mag_r'].hist(bins=100, range=(0, 40))
+plt.xlabel('mag_r')
+plt.ylabel('Number of true objects')
+plt.show()
+
+
+
+## Compute the true and false posititves.
+def eval(truth_magr_max):
+    max_snr = all_src['snr'].max()
+    snr_thresholds = np.linspace(0, max_snr, 100)
+    true_positives = []
+    false_positives = []
+    for snr_threshold in snr_thresholds:
+        true_positives.append(len(all_src[(all_src['label']) & (all_src['snr'] > snr_threshold)]))
+        false_positives.append(len(all_src[(~all_src['label']) & (all_src['snr'] > snr_threshold)]))
+
+
+## The ROC curve
 import matplotlib.pyplot as plt
-max_snr = all_src['snr'].max()
-snr_thresholds = np.linspace(0, max_snr, 100)
-true_positives = []
-false_positives = []
-for snr_threshold in snr_thresholds:
-    true_positives.append(len(all_src[(all_src['label']) & (all_src['snr'] > snr_threshold)]))
-    false_positives.append(len(all_src[(~all_src['label']) & (all_src['snr'] > snr_threshold)]))
+# Set all font sizes to 18
+plt.rcParams.update({'font.size': 18})
 
+plt.figure(figsize=(10, 10))
 plt.plot(false_positives, true_positives, label='ROC curve')
-plt.plot([0, len(all_src)], [0, len(all_src)], linestyle='--', label='Random')
+plt.plot([0, len(all_src)], [0, len(all_src)], linestyle='--', label='Reference')
 plt.xlabel("False positives")
 plt.ylabel("True positives")
 plt.title("ROC curve")
 plt.legend()
-plt.show()
+plt.savefig("roc_curve.png")
+#plt.show()
 
 ## and a Precision-Recall curve
+plt.figure(figsize=(10, 10))
 precision = np.array(true_positives) / (np.array(true_positives) + np.array(false_positives) + 1e-10)
 recall = np.array(true_positives) / len(all_truth)
 plt.plot(recall, precision, label='Precision-Recall curve')
-plt.xlabel("Recall")
-plt.ylabel("Precision")
+plt.xlabel("Recall/Completeness")
+plt.ylabel("Precision/Purity")
 plt.title("Precision-Recall curve")
 plt.xlim(0, 1)
 plt.ylim(0, 1)
-plt.show()
+plt.savefig("precision_recall_curve.png")
+#plt.show()
