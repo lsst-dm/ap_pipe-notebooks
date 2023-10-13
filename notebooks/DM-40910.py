@@ -4,6 +4,8 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 from mask_tools import should_ignore, get_enabled_flags_names
 import numpy as np
+import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 18})
 
 butler = dafButler.Butler("/dc2/dc2")
 
@@ -33,9 +35,13 @@ def xmatch_det_truth(df_true, df_det,
 
     idx, d2d, d3d = cat2.match_to_catalog_sky(cat1)
 
-    imatch = d2d < 1 * u.arcsec  # .0005*u.degree
-    return imatch
+    imatch_det = d2d < 1 * u.arcsec  # .0005*u.degree
 
+    # Create a boolean array for the truth table
+    imatch_true = np.zeros(len(df_true), dtype=bool)
+    imatch_true[idx[imatch_det]] = True
+
+    return imatch_det.tolist(), imatch_true.tolist()
 
 def run_single(i):
     ''' Extracts the truth and detection catalogs for a single visit.
@@ -77,9 +83,9 @@ def run_single(i):
 
     truth = truth[~truth.apply(lambda row: should_ignore(row['mask']), axis=1)]
 
-
-    xmatch_result = xmatch_det_truth(truth, src_table, dec_col_det='dec')
-    src_table['label'] = xmatch_result
+    imatch_det, imatch_true = xmatch_det_truth(truth, src_table, dec_col_det='dec')
+    src_table['label'] = imatch_det
+    truth['detected'] = imatch_true
 
     return src_table, truth
 
@@ -90,13 +96,14 @@ ids = list(butler.registry.queryDataIds(['visit','detector'],
                                         ))
 
 ## print the data ids in a readable format
-for dataId in ids[:100]:
+N_test = 20
+for dataId in ids[:N_test]:
     print(dataId.to_simple())
 
 ## Loop on data ids and extract the truth and detection catalogs
 all_src = pd.DataFrame()
 all_truth = pd.DataFrame()
-for i in range(min(100, len(ids))):
+for i in range(min(len(ids), N_test)):
     src_table, truth = run_single(i)
     all_src = pd.concat([all_src, src_table])
     all_truth = pd.concat([all_truth, truth])
@@ -110,17 +117,36 @@ print("Total number of truth objects: ", len(all_truth))
 print("Number of truth objects not matched to a source (misses): ", len(all_truth) - np.sum(all_src['label']))
 
 ## Some statistics about detections
-# plot the hist of mag_r of all true objects
+# plot the hist of mag_r of true objects that are detected.
 # you need to drop the NaNs and infinities first.
-all_truth['mag_r'].hist(bins=100, range=(0, 40))
+plt.figure(figsize=(10, 8))
+plt.hist(all_truth['mag_r'][np.isfinite(all_truth['mag_r']) & (all_truth['detected'] == False)], bins=100, label='missed')
+plt.hist(all_truth['mag_r'][np.isfinite(all_truth['mag_r']) & all_truth['detected']], bins=100, alpha=0.5, label='detected')
 plt.xlabel('mag_r')
 plt.ylabel('Number of true objects')
+plt.legend()
 plt.show()
+plt.savefig('mag_r_hist.png')
+
+
+## make the same histograms plot, but with delta_flux
+plt.figure(figsize=(10, 8))
+plt.hist(all_truth['delta_flux'][np.isfinite(all_truth['delta_flux']) & (all_truth['detected'] == False)],
+         bins=100, range=(-5000, 5000), label='missed')
+plt.hist(all_truth['delta_flux'][np.isfinite(all_truth['delta_flux']) & all_truth['detected']],
+         bins=100, range=(-5000, 5000), alpha=0.5, label='detected')
+plt.xlabel('delta_flux')
+plt.ylabel('Number of true objects')
+plt.legend()
+plt.show()
+plt.savefig('delta_flux_hist.png')
 
 
 
 ## Compute the true and false posititves.
-def eval(truth_magr_max):
+def eval(truth_magr_max=np.inf):
+    ''' Computes the true and false positives for a given maximum truth mag_r
+    '''
     max_snr = all_src['snr'].max()
     snr_thresholds = np.linspace(0, max_snr, 100)
     true_positives = []
@@ -129,31 +155,40 @@ def eval(truth_magr_max):
         true_positives.append(len(all_src[(all_src['label']) & (all_src['snr'] > snr_threshold)]))
         false_positives.append(len(all_src[(~all_src['label']) & (all_src['snr'] > snr_threshold)]))
 
+    true_positives = np.array(true_positives)
+    false_positives = np.array(false_positives)
+    return true_positives, false_positives, snr_thresholds
 
+true_positives, false_positives, snr_thresholds = eval()
 ## The ROC curve
-import matplotlib.pyplot as plt
-# Set all font sizes to 18
-plt.rcParams.update({'font.size': 18})
 
 plt.figure(figsize=(10, 10))
 plt.plot(false_positives, true_positives, label='ROC curve')
 plt.plot([0, len(all_src)], [0, len(all_src)], linestyle='--', label='Reference')
+plt.xlim(0, len(all_src))
 plt.xlabel("False positives")
 plt.ylabel("True positives")
 plt.title("ROC curve")
 plt.legend()
+plt.show()
 plt.savefig("roc_curve.png")
-#plt.show()
 
 ## and a Precision-Recall curve
 plt.figure(figsize=(10, 10))
-precision = np.array(true_positives) / (np.array(true_positives) + np.array(false_positives) + 1e-10)
-recall = np.array(true_positives) / len(all_truth)
-plt.plot(recall, precision, label='Precision-Recall curve')
+for mag_r in range(10, 30, 5):
+    true_positives, false_positives, snr_thresholds = eval(truth_magr_max=mag_r)
+    precision = np.array(true_positives) / (np.array(true_positives) + np.array(false_positives) + 1e-10)
+    recall = np.array(true_positives) / len(all_truth)
+    #plt.plot(recall, precision, label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
+    plt.plot(recall, label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
+    plt.show()
+##
+
 plt.xlabel("Recall/Completeness")
 plt.ylabel("Precision/Purity")
 plt.title("Precision-Recall curve")
 plt.xlim(0, 1)
 plt.ylim(0, 1)
+plt.legend()
+plt.show()
 plt.savefig("precision_recall_curve.png")
-#plt.show()
