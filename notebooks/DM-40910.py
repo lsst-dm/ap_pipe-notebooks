@@ -1,3 +1,4 @@
+##
 import lsst.daf.butler as dafButler
 import pandas as pd
 from astropy.coordinates import SkyCoord
@@ -20,12 +21,12 @@ calexp_collection = 'u/nsedaghat/RegeneratedCalexps_w_2022_20_nobfk/20231002T214
 
 def xmatch_det_truth(df_true, df_det,
                      ra_col_true="ra", dec_col_true="dec",
-                     ra_col_det="ra", dec_col_det="decl"
+                     ra_col_det="ra", dec_col_det="dec"
                      ):
     if len(df_det) == 0:
         return []
     elif len(df_true) == 0:
-        return False * len(df_det)
+        return [-1] * len(df_det)
 
     cat1 = SkyCoord(ra=df_true[ra_col_true].values * u.degree,
                     dec=df_true[dec_col_true].values * u.degree)
@@ -37,11 +38,16 @@ def xmatch_det_truth(df_true, df_det,
 
     imatch_det = d2d < 1 * u.arcsec  # .0005*u.degree
 
-    # Create a boolean array for the truth table
-    imatch_true = np.zeros(len(df_true), dtype=bool)
-    imatch_true[idx[imatch_det]] = True
+   # For matched detections, store the truth index. Otherwise, store -1.
+    matched_indices = np.where(d2d < 1 * u.arcsec, idx, -1)
 
-    return imatch_det.tolist(), imatch_true.tolist()
+    return matched_indices.tolist()
+
+# # Create a boolean array for the truth table
+#     imatch_true = np.zeros(len(df_true), dtype=bool)
+#     imatch_true[idx[imatch_det]] = True
+
+#     return imatch_det.tolist(), imatch_true.tolist()
 
 def run_single(i):
     ''' Extracts the truth and detection catalogs for a single visit.
@@ -83,9 +89,18 @@ def run_single(i):
 
     truth = truth[~truth.apply(lambda row: should_ignore(row['mask']), axis=1)]
 
-    imatch_det, imatch_true = xmatch_det_truth(truth, src_table, dec_col_det='dec')
-    src_table['label'] = imatch_det
-    truth['detected'] = imatch_true
+    # Cross-match the truth and detections
+    imatch_det = xmatch_det_truth(truth, src_table)
+    src_table['matched_truth_index'] = imatch_det
+    mask = src_table['matched_truth_index'] != -1
+    src_table.loc[mask, 'matched_truth_magr'] = truth['mag_r'].values[src_table.loc[mask, 'matched_truth_index'].values]
+    #src_table['matched_truth_magr'] = truth['mag_r'].values[src_table['matched_truth_index'].values]
+    src_table['label'] = src_table['matched_truth_index'] != -1
+    truth['detected'] = truth.index.isin(imatch_det)
+
+    # imatch_det, imatch_true = xmatch_det_truth(truth, src_table, dec_col_det='dec')
+    # src_table['label'] = imatch_det
+    # truth['detected'] = imatch_true
 
     return src_table, truth
 
@@ -96,13 +111,14 @@ ids = list(butler.registry.queryDataIds(['visit','detector'],
                                         ))
 
 ## print the data ids in a readable format
-N_test = 20
+N_test = 100
 for dataId in ids[:N_test]:
     print(dataId.to_simple())
 
 ## Loop on data ids and extract the truth and detection catalogs
 all_src = pd.DataFrame()
 all_truth = pd.DataFrame()
+
 for i in range(min(len(ids), N_test)):
     src_table, truth = run_single(i)
     all_src = pd.concat([all_src, src_table])
@@ -125,8 +141,8 @@ plt.hist(all_truth['mag_r'][np.isfinite(all_truth['mag_r']) & all_truth['detecte
 plt.xlabel('mag_r')
 plt.ylabel('Number of true objects')
 plt.legend()
-plt.show()
 plt.savefig('mag_r_hist.png')
+plt.show()
 
 
 ## make the same histograms plot, but with delta_flux
@@ -138,51 +154,57 @@ plt.hist(all_truth['delta_flux'][np.isfinite(all_truth['delta_flux']) & all_trut
 plt.xlabel('delta_flux')
 plt.ylabel('Number of true objects')
 plt.legend()
-plt.show()
 plt.savefig('delta_flux_hist.png')
-
+plt.show()
 
 
 ## Compute the true and false posititves.
-def eval(truth_magr_max=np.inf):
+def eval_filtered(truth_magr_max=np.inf):
     ''' Computes the true and false positives for a given maximum truth mag_r
     '''
+
+    good_sources = all_src[all_src['label'] & (all_src['matched_truth_magr'] < truth_magr_max)]
+
     max_snr = all_src['snr'].max()
     snr_thresholds = np.linspace(0, max_snr, 100)
     true_positives = []
     false_positives = []
     for snr_threshold in snr_thresholds:
-        true_positives.append(len(all_src[(all_src['label']) & (all_src['snr'] > snr_threshold)]))
+        true_positives.append(np.sum(good_sources['snr'] > snr_threshold))
         false_positives.append(len(all_src[(~all_src['label']) & (all_src['snr'] > snr_threshold)]))
 
     true_positives = np.array(true_positives)
     false_positives = np.array(false_positives)
     return true_positives, false_positives, snr_thresholds
 
-true_positives, false_positives, snr_thresholds = eval()
 ## The ROC curve
-
 plt.figure(figsize=(10, 10))
-plt.plot(false_positives, true_positives, label='ROC curve')
-plt.plot([0, len(all_src)], [0, len(all_src)], linestyle='--', label='Reference')
-plt.xlim(0, len(all_src))
+for mag_r in range(10, 30, 2):
+    true_positives, false_positives, snr_thresholds = eval_filtered(truth_magr_max=mag_r)
+    plt.plot(false_positives/len(all_src), true_positives/len(all_src), label='mag_r < {}'.format(mag_r))
+
+plt.plot([0, 1], [0, 1], linestyle='--', label='Reference')
+#plt.plot([0, len(all_src)], [0, len(all_src)], linestyle='--', label='Reference')
+#plt.xlim(0, len(all_src))
 plt.xlabel("False positives")
 plt.ylabel("True positives")
 plt.title("ROC curve")
 plt.legend()
-plt.show()
 plt.savefig("roc_curve.png")
+plt.show()
 
-## and a Precision-Recall curve
+## ROC curve using scikit-learn
+from sklearn.metrics import roc_curve, auc
+
+fpr, tpr, thresholds = roc_curve(all_src['label'], all_src['snr'])
+
+## and a set of Precision-Recall curve
 plt.figure(figsize=(10, 10))
-for mag_r in range(10, 30, 5):
-    true_positives, false_positives, snr_thresholds = eval(truth_magr_max=mag_r)
+for mag_r in range(10, 30, 2):
+    true_positives, false_positives, snr_thresholds = eval_filtered(mag_r)
     precision = np.array(true_positives) / (np.array(true_positives) + np.array(false_positives) + 1e-10)
     recall = np.array(true_positives) / len(all_truth)
-    #plt.plot(recall, precision, label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
-    plt.plot(recall, label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
-    plt.show()
-##
+    plt.plot(recall, precision, label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
 
 plt.xlabel("Recall/Completeness")
 plt.ylabel("Precision/Purity")
@@ -190,5 +212,34 @@ plt.title("Precision-Recall curve")
 plt.xlim(0, 1)
 plt.ylim(0, 1)
 plt.legend()
-plt.show()
 plt.savefig("precision_recall_curve.png")
+plt.show()
+
+## And a curve showing completeness and purity vs. SNR threshold
+plt.figure(figsize=(20, 10))
+plt.subplot(1, 2, 1)
+for mag_r in range(10, 30, 2):
+    true_positives, false_positives, snr_thresholds = eval_filtered(mag_r)
+    plt.plot(snr_thresholds, true_positives/len(all_truth), label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
+
+plt.xlim(0, max(snr_thresholds))
+plt.ylim(0, 1)
+plt.xlabel("SNR threshold")
+# use latex
+plt.ylabel("Completeness: $TP/(TP+FN)$")
+plt.legend()
+
+plt.subplot(1, 2, 2)
+for mag_r in range(10, 30, 2):
+    true_positives, false_positives, snr_thresholds = eval_filtered(mag_r)
+    plt.plot(snr_thresholds, true_positives/(true_positives + false_positives + 1e-10), label=f'mag_r < {mag_r}', linewidth=5, alpha=0.5)
+
+plt.xlim(0, max(snr_thresholds))
+plt.ylim(0, 1)
+plt.xlabel("SNR threshold")
+plt.ylabel("Purity: $TP/(TP+FP)$")
+plt.legend()
+
+
+plt.savefig("detection_rate.png")
+plt.show()
