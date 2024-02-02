@@ -34,7 +34,7 @@ df = pd.DataFrame(ids)
 
 
 #- counts of items of each type
-print(df.groupby('type')['instrument'].count())
+print(df.groupby('type')['instrument'].count().to_string())
 print()
 
 #- ranges of visits/detectors or tracts/patches
